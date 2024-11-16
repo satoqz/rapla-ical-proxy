@@ -52,12 +52,8 @@ struct CachedResponseWeighter;
 
 impl Weighter<String, CachedResponse> for CachedResponseWeighter {
     fn weight(&self, key: &String, val: &CachedResponse) -> u64 {
-        // Rough estimate of response size in Kilobytes. Ensure weight is at least 1.
-        ((mem::size_of::<CachedResponse>() as u64
-            + key.bytes().len() as u64
-            + val.body.len() as u64)
-            / 1024)
-            .max(1)
+        // Rough estimate of response size in bytes. Ensure weight is at least 1.
+        (mem::size_of::<CachedResponse>() as u64 + key.len() as u64 + val.body.len() as u64).max(1)
     }
 }
 
@@ -72,10 +68,9 @@ struct MiddlewareState {
 }
 
 pub fn apply_middleware(router: Router, config: Config) -> Router {
-    // Our ICS responses are in the 100 Kilobyte grade of size.
-    // By default (see CLI args) the total cache capacity is set to 50 Megabytes,
-    // this should be too little to matter in terms of resource usage and enough to hold a couple hundred calendars.
-    let cache = Cache::with_weighter(100, 1024 * config.max_size, CachedResponseWeighter);
+    let capacity = config.max_size * 1024 * 1024; // Megabytes, weighter measures bytes
+    let cache = Cache::with_weighter(100, capacity, CachedResponseWeighter);
+
     router.route_layer(middleware::from_fn_with_state(
         Arc::new(MiddlewareState {
             cache,
