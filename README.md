@@ -1,47 +1,43 @@
 # rapla-ical-proxy
 
-- [Introduction](#introduction)
-- [Usage as Calendar Synchronizer](#usage-as-calendar-synchronizer)
-- [Self-Hosting](#self-hosting)
-- [Configuration](#configuration)
+[![Build](https://img.shields.io/github/actions/workflow/status/satoqz/rapla-ical-proxy/build-push.yml?label=build&logo=docker)](https://github.com/satoqz/rapla-ical-proxy/pkgs/container/rapla-ical-proxy)
+[![Checks](https://img.shields.io/github/actions/workflow/status/satoqz/rapla-ical-proxy/checks.yml?label=checks&logo=github)](https://github.com/satoqz/rapla-ical-proxy/actions/workflows/checks.yml)
+[![Fly.io](https://img.shields.io/github/deployments/satoqz/rapla-ical-proxy/production?label=fly.io&logo=fly.io)](https://github.com/satoqz/rapla-ical-proxy/deployments/production)
 
-## Introduction
+- [**Quickstart**](#quickstart)
+- [**Architecture**](#architecture)
+- [**Self-hosting**](#self-hosting)
 
-`rapla-ical-proxy` is a web service that converts the HTML calendar shown by DHBW's class schedule page ([rapla.dhbw.de](https://rapla.dhbw.de)) into the universally accepted [iCalendar](https://icalendar.org/) format on the fly.
-Rapla does not natively offer a (reliable) method to integrate with internet calendar providers (think Outlook, Google Calendar, etc.), thus a 3rd party service like this is needed to bridge the gap.
+**rapla-ical-proxy** proxies requests to the HTML-based class schedule page of DHBW to the iCalendar format such that it can be imported and continuously synced into proper calendar software such as Outlook, Google Calendar and lots of others.
 
-I host a public instance at `rapla.satoqz.net`, powered by [fly.io](https://fly.io).
+If you are a dual student at DHBW looking to view your work schedule together with your class schedule in the same calendar app, this is the solution you're looking for.
 
-## Usage as Calendar Synchronizer
+## Quickstart
 
-To get started synchronizing your schedule to a calendar provider of your choice, follow below steps:
+This shouldn't take you more than 5 minutes:
 
-1. Get your Rapla URL ready.
-   This should be a very long URL with `rapla.dhbw.de` as its host, provided to you by DHBW.
+1. Get your rapla link ready. This should be a decently long URL starting with "https://rapla.dhbw.de/...".
 
-2. Replace the `dhbw.de` part of the URL with `satoqz.net`, such that it becomes `rapla.satoqz.net`.
+2. Replace "dhbw.de" with "satoqz.net".
 
-3. Paste the resulting URL into the "New calendar subscription" field of your calendar provider. The name of this feature varies based on your provider.
+3. Paste the result into the "New calendar subscription" feature of your calendar app. The name of the feature may vary based on what app you're using.
 
-## Self-Hosting
+Congratulations, you no longer need the HTML-based rapla calendar. The calendar subscription you just created will automatically stay in sync with any updates made to your schedule.
 
-A [Dockerfile](./Dockerfile) is included for easy deployment.
+## Architecture
 
-## Configuration
+![Architecture Diagram](./docs/architecture.png)
 
+## Self-hosting
+
+You can easily deploy the proxy yourself using the container image built by GitHub Actions. Both `linux/amd64` and `linux/arm64` platforms are supported.
+
+```sh
+docker run -p 8080:8080 ghcr.io/satoqz/rapla-ical-proxy
 ```
-$ rapla-ical-proxy --help
 
-Usage: rapla-ical-proxy [-h] [-a SOCKET_ADDRESS] [-c] [-t SECONDS] [-s MEGABYTES]
+You can customize address/port configuration and caching behavior using command line flags. To list available options, run:
 
-Options:
-    -h, --help          Print the help output of rapla-ical-proxy
-    -a, --address SOCKET_ADDRESS
-                        Socket address (IP and port) to listen on [Default:
-                        127.0.0.1:8080]
-    -c, --cache-enable  Enable caching of parsed calendars [Default: false]
-    -t, --cache-ttl SECONDS
-                        Time-to-live for cached calendars [Default: 3600]
-    -s, --cache-max-size MEGABYTES
-                        Maximum cache size in Megabytes [Default: 50]
+```sh
+docker run ghcr.io/satoqz/rapla-ical-proxy --help
 ```
