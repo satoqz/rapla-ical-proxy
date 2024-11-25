@@ -11,10 +11,20 @@ use serde::Deserialize;
 use crate::parser::parse_calendar;
 use crate::structs::Calendar;
 
-#[derive(Deserialize)]
-struct CalendarQuery {
-    key: String,
-    salt: String,
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum CalendarQuery {
+    V1 { key: String, salt: String },
+    V2 { user: String, file: String },
+}
+
+impl Display for CalendarQuery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::V1 { key, salt } => write!(f, "&key={key}&salt={salt}"),
+            Self::V2 { user, file } => write!(f, "&user={user}&file={file}"),
+        }
+    }
 }
 
 enum Error {
@@ -89,9 +99,10 @@ pub fn router(cache_config: Option<crate::cache::Config>) -> Router {
 
 async fn handle_calendar(
     Path(calendar_path): Path<String>,
-    Query(CalendarQuery { key, salt }): Query<CalendarQuery>,
+    Query(query): Query<CalendarQuery>,
 ) -> Response {
-    let calendar = fetch_calendar(calendar_path, key, salt).await;
+    let url = generate_upstream_url(calendar_path, query);
+    let calendar = fetch_calendar(url).await;
 
     match calendar {
         Ok(calendar) => (
@@ -103,16 +114,8 @@ async fn handle_calendar(
     }
 }
 
-async fn fetch_calendar(
-    calendar_path: String,
-    key: String,
-    salt: String,
-) -> Result<Calendar, Error> {
-    let url = generate_upstream_url(&calendar_path, &key, &salt);
-    eprintln!("{url}");
-
+async fn fetch_calendar(url: String) -> Result<Calendar, Error> {
     let response = reqwest::get(url).await.map_err(Error::UpstreamConnection)?;
-
     let response_url = response.url().clone();
     let response_status = response.status();
 
@@ -128,7 +131,7 @@ async fn fetch_calendar(
     parse_calendar(&html).ok_or(Error::Parse(response_url, response_status))
 }
 
-fn generate_upstream_url(calendar_path: &str, key: &str, salt: &str) -> String {
+fn generate_upstream_url(calendar_path: String, query: CalendarQuery) -> String {
     // these don't need to be 100% accurate
     const WEEKS_TWO_YEARS: usize = 104;
     const DAYS_ONE_YEAR: i64 = 365;
@@ -139,9 +142,9 @@ fn generate_upstream_url(calendar_path: &str, key: &str, salt: &str) -> String {
     const UPSTREAM: &str = "https://rapla.dhbw.de";
 
     format!(
-        "{UPSTREAM}/rapla/{calendar_path}?key={key}&salt={salt}&day={}&month={}&year={}&pages={WEEKS_TWO_YEARS}",
+        "{UPSTREAM}/rapla/{calendar_path}?day={}&month={}&year={}&pages={WEEKS_TWO_YEARS}{query}",
         year_ago.day(),
         year_ago.month(),
-        year_ago.year()
+        year_ago.year(),
     )
 }
