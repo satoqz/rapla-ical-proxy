@@ -9,4 +9,5 @@ COPY rapla-ical-proxy-${TARGETARCH} /usr/local/bin/rapla-ical-proxy
 USER 65532:65532
 EXPOSE 8080
 
-CMD ["rapla-ical-proxy", "--address=0.0.0.0:8080", "--cache-enable"]
+ENTRYPOINT [ "rapla-ical-proxy" ]
+CMD [ "--address=0.0.0.0:8080", "--cache-enable" ]
