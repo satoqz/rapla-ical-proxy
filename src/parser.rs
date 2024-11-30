@@ -13,8 +13,8 @@ macro_rules! selector {
     }};
 }
 
-pub fn parse_calendar<S: AsRef<str>>(s: S) -> Option<Calendar> {
-    let html = Html::parse_document(s.as_ref());
+pub fn parse_calendar(s: &str, mut start_year: i32) -> Option<Calendar> {
+    let html = Html::parse_document(s);
     let name = html
         .select(selector!("title"))
         .next()?
@@ -22,12 +22,7 @@ pub fn parse_calendar<S: AsRef<str>>(s: S) -> Option<Calendar> {
         .trim()
         .to_string();
 
-    let mut start_year = html
-        .select(selector!("select[name=year] > option[selected]"))
-        .next()?
-        .inner_html()
-        .parse::<i32>()
-        .ok()?;
+    eprintln!("got to 1");
 
     let mut events = Vec::new();
 
