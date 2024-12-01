@@ -44,11 +44,11 @@ macro_rules! source_url {
     };
 }
 
-macro_rules! generic_parse_error {
-    ($message:expr) => {
+macro_rules! parse_error {
+    ($($arg:tt)*) => {
         ParseError {
             location: source_url!(),
-            kind: ParseErrorKind::Generic($message),
+            kind: ParseErrorKind::Generic(format!($($arg)*)),
         }
     };
 }
@@ -85,9 +85,14 @@ pub fn parse_calendar(s: &str, mut start_year: i32) -> Result<Calendar, ParseErr
             .inner_html()
             .split(' ')
             .nth(1)
-            .ok_or(generic_parse_error!("".into()))?
+            .ok_or_else(|| {
+                parse_error!(
+                    "malformed calendar week number in week #{}: missing second element after splitting by space",
+                    idx + 1
+                )
+            })?
             .parse::<usize>()
-            .map_err(|_| generic_parse_error!("".into()))?;
+            .map_err(|err| parse_error!("malformed calendar week number in week #{}: {err}", idx + 1))?;
 
         if week_number == 1 && idx > 0 {
             start_year += 1;
@@ -103,49 +108,41 @@ pub fn parse_calendar(s: &str, mut start_year: i32) -> Result<Calendar, ParseErr
 fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseError> {
     let start_date_raw = select_first!(element, "tr > td.week_header > nobr")?.inner_html();
 
-    let mut day_month = start_date_raw
+    let day_month = start_date_raw
         .split(' ')
         .nth(1)
-        .ok_or(generic_parse_error!("".into()))?
+        .ok_or_else(|| {
+            parse_error!("failed to find day and month in week header `{start_date_raw}`: missing second element after splitting by space")
+        })?
         .trim_end_matches('.')
-        .split('.');
+        .split('.')
+        .collect::<Vec<_>>();
 
-    let start_day = day_month
-        .next()
-        .ok_or(generic_parse_error!("".into()))?
-        .parse::<u32>()
-        .map_err(|_| generic_parse_error!("".into()))?;
+    if day_month.len() != 2 {
+        return Err(parse_error!(
+            "expected day + month information in week header `{start_date_raw}` to consist of two elements when splitting by dots")
+        );
+    }
 
-    let start_month = day_month
-        .next()
-        .ok_or(generic_parse_error!("".into()))?
-        .parse::<u32>()
-        .map_err(|_| generic_parse_error!("".into()))?;
-
-    let monday = NaiveDate::from_ymd_opt(start_year, start_month, start_day)
-        .ok_or(generic_parse_error!("".into()))?;
+    let start_day = day_month[0].parse::<u32>().map_err(|_| parse_error!(""))?;
+    let start_month = day_month[1].parse::<u32>().map_err(|_| parse_error!(""))?;
+    let monday =
+        NaiveDate::from_ymd_opt(start_year, start_month, start_day).ok_or(parse_error!(""))?;
 
     let mut events = Vec::new();
     for row in element.select(selector!("tr")).skip(1) {
         let mut day_index = 0;
 
         for column in row.select(selector!("td")) {
-            let class = column
-                .value()
-                .classes()
-                .next()
-                .ok_or(generic_parse_error!("".into()))?;
-
+            let class = column.value().classes().next().ok_or(parse_error!(""))?;
             if class.starts_with("week_separatorcell") {
                 day_index += 1;
             }
-
             if class != "week_block" {
                 continue;
             }
 
-            let date =
-                monday + Duration::try_days(day_index).ok_or(generic_parse_error!("".into()))?;
+            let date = monday + Duration::try_days(day_index).ok_or(parse_error!(""))?;
             events.push(parse_event_details(column, date)?);
         }
     }
@@ -157,29 +154,17 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, Pa
     let details = select_first!(element, "a")?.inner_html();
     let mut details_split = details.split("<br>");
 
-    let times_raw = details_split
-        .next()
-        .ok_or(generic_parse_error!("".into()))?;
+    let times_raw = details_split.next().ok_or(parse_error!(""))?;
     let mut times_raw_split = times_raw.split("&nbsp;-");
 
-    let start = NaiveTime::parse_from_str(
-        times_raw_split
-            .next()
-            .ok_or(generic_parse_error!("".into()))?,
-        "%H:%M",
-    )
-    .map_err(|_| generic_parse_error!("".into()))?;
-    let end = NaiveTime::parse_from_str(
-        times_raw_split
-            .next()
-            .ok_or(generic_parse_error!("".into()))?,
-        "%H:%M",
-    )
-    .map_err(|_| generic_parse_error!("".into()))?;
+    let start = NaiveTime::parse_from_str(times_raw_split.next().ok_or(parse_error!(""))?, "%H:%M")
+        .map_err(|_| parse_error!(""))?;
+    let end = NaiveTime::parse_from_str(times_raw_split.next().ok_or(parse_error!(""))?, "%H:%M")
+        .map_err(|_| parse_error!(""))?;
 
     let title = details_split
         .next()
-        .ok_or(generic_parse_error!("".into()))?
+        .ok_or(parse_error!(""))?
         .replace("&amp;", "&");
 
     let resources = element
