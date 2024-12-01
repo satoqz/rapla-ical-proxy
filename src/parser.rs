@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 use std::ops::Not;
 
-use chrono::{Duration, NaiveDate, NaiveTime};
+use chrono::{Duration, NaiveDate, NaiveTime, Timelike};
 use html_escape::decode_html_entities;
 use once_cell::sync::Lazy;
 use scraper::{ElementRef, Html, Selector};
@@ -170,7 +170,7 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, Pa
     ))?;
     let mut times_raw_split = times_raw.split("&nbsp;-");
 
-    let start = NaiveTime::parse_from_str(
+    let mut start = NaiveTime::parse_from_str(
         times_raw_split
             .next()
             .ok_or(parse_error!("missing event start time in '{times_raw}'"))?,
@@ -178,13 +178,26 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, Pa
     )
     .map_err(|err| parse_error!("couldn't parse event start time from '{times_raw}': {err}"))?;
 
-    let end = NaiveTime::parse_from_str(
-        times_raw_split
-            .next()
-            .ok_or(parse_error!("missing event end time in '{times_raw}'"))?,
-        "%H:%M",
-    )
-    .map_err(|err| parse_error!("couldn't parse event end time from '{times_raw}': {err}"))?;
+    let end_time_raw = times_raw_split
+        .next()
+        .ok_or(parse_error!("missing event end time in '{times_raw}'"))?;
+    // Some genuises at DHBW find it a great idea to leave out the end time
+    // to signify "full day" which is to be interpreted as "until 18:00".
+    // THEY EVEN KEEP THE DASH AFTER THE START TIME AS BAIT :(
+    let end = if end_time_raw.is_empty() {
+        // The sheer idea of the above irritates me to much that I'll unwrap here
+        NaiveTime::from_hms_opt(18, 0, 0).unwrap()
+    } else {
+        NaiveTime::parse_from_str(end_time_raw, "%H:%M").map_err(|err| {
+            parse_error!("couldn't parse event end time from '{times_raw}': {err}")
+        })?
+    };
+    // Also, they will set the start time to 00:00 when it's actually supposed to be 08:00.
+    // At least that's how it's displayed on the website.
+    if start.hour() == 0 && start.minute() == 0 {
+        // Grr.
+        start = NaiveTime::from_hms_opt(8, 0, 0).unwrap();
+    }
 
     let title = details_split
         .next()
