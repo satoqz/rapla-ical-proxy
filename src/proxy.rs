@@ -4,6 +4,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{Datelike, Duration, Utc};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::calendar::Calendar;
@@ -92,7 +93,7 @@ async fn handle_calendar(
 
     let (url, start_year) = generate_upstream_url(calendar_path, query);
 
-    let upstream_response = reqwest::get(&url).await.map_err(|err| ProxyError {
+    let connection_error = |err: reqwest::Error| ProxyError {
         status_code: StatusCode::BAD_GATEWAY,
         upstream: Some(UpstreamInfo {
             url: url.clone(),
@@ -102,18 +103,29 @@ async fn handle_calendar(
         details: Some(ProxyErrorDetails::Err {
             details: err.without_url().to_string(),
         }),
-    })?;
+    };
 
+    let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+    let client = Client::builder()
+        .user_agent(user_agent)
+        .build()
+        .map_err(connection_error)?;
+
+    let request = client.get(&url).build().map_err(connection_error)?;
+    let upstream_response = client.execute(request).await.map_err(connection_error)?;
     let upstream_status = upstream_response.status();
-    let upstream_info = Some(UpstreamInfo {
-        url: url.clone(),
-        status_code: Some(upstream_status.as_u16()),
-    });
+
+    let upstream_info = || {
+        Some(UpstreamInfo {
+            url: url.clone(),
+            status_code: Some(upstream_status.as_u16()),
+        })
+    };
 
     if !upstream_status.is_success() {
         return Err(ProxyError {
             status_code: upstream_status, // Propagate whatever issue they're having.
-            upstream: upstream_info.clone(),
+            upstream: upstream_info(),
             message: "upstream returned bad status code",
             details: None,
         });
@@ -121,7 +133,7 @@ async fn handle_calendar(
 
     let html = upstream_response.text().await.map_err(|err| ProxyError {
         status_code: StatusCode::BAD_GATEWAY,
-        upstream: upstream_info.clone(),
+        upstream: upstream_info(),
         message: "couldn't parse body returned by upstream",
         details: Some(ProxyErrorDetails::Err {
             details: err.without_url().to_string(),
@@ -130,7 +142,7 @@ async fn handle_calendar(
 
     parse_calendar(&html, start_year).map_err(|err| ProxyError {
         status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        upstream: upstream_info.clone(),
+        upstream: upstream_info(),
         message: "couldn't parse HTML returned by upstream",
         details: Some(ProxyErrorDetails::Parse(err)),
     })
