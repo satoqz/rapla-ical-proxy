@@ -13,9 +13,14 @@ RUN cargo chef cook --locked --release
 COPY . .
 RUN cargo build --frozen --release
 
-FROM gcr.io/distroless/static:nonroot@sha256:d71f4b239be2d412017b798a0a401c44c3049a3ca454838473a4c32ed076bfea 
+FROM gcr.io/distroless/static:nonroot@sha256:d71f4b239be2d412017b798a0a401c44c3049a3ca454838473a4c32ed076bfea AS runtime
 USER 65532:65532
 EXPOSE 8080
-COPY --from=builder /build/target/release/rapla-ical-proxy /usr/local/bin/rapla-ical-proxy
 ENTRYPOINT [ "rapla-ical-proxy" ]
 CMD [ "--address=0.0.0.0:8080", "--cache" ]
+
+FROM runtime AS external-build
+COPY rapla-ical-proxy /usr/local/bin/rapla-ical-proxy
+
+FROM runtime AS docker-build
+COPY --from=builder /build/target/release/rapla-ical-proxy /usr/local/bin/rapla-ical-proxy
