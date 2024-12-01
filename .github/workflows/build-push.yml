@@ -82,16 +82,10 @@ jobs:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
         id: meta
-
-      - name: Select tags
-        run: |
-          if [[ "${{ github.event_name }}" = "pull_request" ]]; then
-            echo "tags=${{ steps.meta.outputs.tags }}" > "$GITHUB_OUTPUT"
-          else
-            echo "tags=${{ steps.meta.outputs.tags }},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" > "$GITHUB_OUTPUT"
-          fi
-        id: tags
 
       - name: Download binaries
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.8.1
@@ -118,7 +112,7 @@ jobs:
           context: bin
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.tags.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
@@ -131,7 +125,7 @@ jobs:
 
       - name: Sign container image
         env:
-          TAGS: ${{ steps.tags.outputs.tags }}
+          TAGS: ${{ steps.meta.outputs.tags }}
           DIGEST: ${{ steps.build-push.outputs.digest }}
         run: echo "${TAGS}" | tr ',' '\n' | xargs -I {} cosign sign --yes {}@${DIGEST}
         if: github.event_name != 'pull_request'
