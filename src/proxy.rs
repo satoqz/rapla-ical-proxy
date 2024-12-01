@@ -69,6 +69,14 @@ impl Display for ProxyErrorDetails {
     }
 }
 
+impl ProxyError {
+    fn sentry_capture(self) -> Self {
+        #[cfg(feature = "sentry")]
+        sentry::capture_error(&self);
+        self
+    }
+}
+
 impl IntoResponse for ProxyError {
     fn into_response(self) -> Response {
         (self.status_code, Json(self)).into_response()
@@ -136,20 +144,31 @@ async fn handle_calendar(
         });
     }
 
-    let html = upstream_response.text().await.map_err(|err| ProxyError {
-        status_code: StatusCode::BAD_GATEWAY,
-        upstream: upstream_info(),
-        message: "couldn't parse body returned by upstream",
-        details: Some(ProxyErrorDetails::Err {
-            details: err.without_url().to_string(),
-        }),
+    let html = upstream_response.text().await.map_err(|err| {
+        ProxyError {
+            status_code: StatusCode::BAD_GATEWAY,
+            upstream: upstream_info(),
+            message: "couldn't parse body returned by upstream",
+            details: Some(ProxyErrorDetails::Err {
+                details: err.without_url().to_string(),
+            }),
+        }
+        // I'd be curious to know if this ever occurs.
+        .sentry_capture()
     })?;
 
-    parse_calendar(&html, start_year).map_err(|err| ProxyError {
-        status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        upstream: upstream_info(),
-        message: "couldn't parse HTML returned by upstream",
-        details: Some(ProxyErrorDetails::Parse(err)),
+    parse_calendar(&html, start_year).map_err(|err| {
+        ProxyError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            upstream: upstream_info(),
+            message: "couldn't parse HTML returned by upstream",
+            details: Some(ProxyErrorDetails::Parse(err)),
+        }
+        // These are the important errors we really want to track.
+        // Given that Rapla returned a successful status code for a set of well-formed
+        // query parameters, we can be at least 90% certain that our parsing is broken
+        // (or was broken, depending on how you see it).
+        .sentry_capture()
     })
 }
 
