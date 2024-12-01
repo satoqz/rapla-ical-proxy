@@ -38,6 +38,7 @@ struct Args {
 }
 
 fn main() -> io::Result<()> {
+    #[cfg(feature = "sentry")]
     let sentry = sentry::init(sentry::ClientOptions {
         release: Some(env!("GIT_COMMIT_HASH").into()),
         ..Default::default()
@@ -49,6 +50,7 @@ fn main() -> io::Result<()> {
     eprintln!("Caching enabled:         {}", args.cache);
     eprintln!("Cache time to live:      {}s", args.cache_ttl);
     eprintln!("Cache max size:          {}mb", args.cache_max_size);
+    #[cfg(feature = "sentry")]
     eprintln!("Sentry enabled:          {}", sentry.is_enabled());
 
     tokio::runtime::Builder::new_multi_thread()

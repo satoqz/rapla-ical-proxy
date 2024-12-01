@@ -71,6 +71,7 @@ impl Display for ProxyErrorDetails {
 
 impl ProxyError {
     fn sentry_capture(self) -> Self {
+        #[cfg(feature = "sentry")]
         sentry::capture_error(&self);
         self
     }
