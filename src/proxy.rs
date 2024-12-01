@@ -117,26 +117,7 @@ async fn handle_calendar(
 
     let (url, start_year) = generate_upstream_url(calendar_path, query);
 
-    let connection_error = |err: reqwest::Error| ProxyError {
-        status_code: StatusCode::BAD_GATEWAY,
-        upstream: Some(UpstreamInfo {
-            url: url.clone(),
-            status_code: None,
-        }),
-        message: "couldn't connect to upstream",
-        details: Some(ProxyErrorDetails::Err {
-            details: err.without_url().to_string(),
-        }),
-    };
-
-    let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
-    let client = Client::builder()
-        .user_agent(user_agent)
-        .build()
-        .map_err(connection_error)?;
-
-    let request = client.get(&url).build().map_err(connection_error)?;
-    let upstream_response = client.execute(request).await.map_err(connection_error)?;
+    let upstream_response = send_request(&url).await?;
     let upstream_status = upstream_response.status();
 
     let upstream_info = || {
@@ -191,4 +172,27 @@ fn generate_upstream_url(calendar_path: String, query: CalendarQuery) -> (String
     );
 
     (url, year_ago.year())
+}
+
+async fn send_request(url: &str) -> Result<reqwest::Response, ProxyError> {
+    let into_proxy_error = |err: reqwest::Error| ProxyError {
+        status_code: StatusCode::BAD_GATEWAY,
+        upstream: Some(UpstreamInfo {
+            url: url.to_string(),
+            status_code: None,
+        }),
+        message: "couldn't connect to upstream",
+        details: Some(ProxyErrorDetails::Err {
+            details: err.without_url().to_string(),
+        }),
+    };
+
+    let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+    let client = Client::builder()
+        .user_agent(user_agent)
+        .build()
+        .map_err(into_proxy_error)?;
+
+    let request = client.get(url).build().map_err(into_proxy_error)?;
+    client.execute(request).await.map_err(into_proxy_error)
 }
