@@ -6,7 +6,7 @@ use html_escape::decode_html_entities;
 use once_cell::sync::Lazy;
 use scraper::{ElementRef, Html, Selector};
 
-use crate::structs::{Calendar, Event};
+use crate::calendar::{Calendar, Event};
 
 pub struct ParseError {
     location: String,

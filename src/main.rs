@@ -1,9 +1,8 @@
 mod cache;
+mod calendar;
 mod cli;
-mod ics;
 mod parser;
 mod proxy;
-mod structs;
 
 use std::env;
 use std::io;

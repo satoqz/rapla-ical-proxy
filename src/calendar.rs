@@ -1,10 +1,22 @@
-use ics::{
-    parameters::TzIDParam,
-    properties::{Description, DtEnd, DtStart, Location, Organizer, RRule, Summary, TzName},
-    Daylight, Standard, TimeZone,
-};
+use chrono::{NaiveDate, NaiveTime};
+use ics::parameters::TzIDParam;
+use ics::properties::{Description, DtEnd, DtStart, Location, Organizer, RRule, Summary, TzName};
+use ics::{Daylight, Standard, TimeZone};
 
-use crate::structs::{Calendar, Event};
+pub struct Calendar {
+    pub name: String,
+    pub events: Vec<Event>,
+}
+
+pub struct Event {
+    pub date: NaiveDate,
+    pub start: NaiveTime,
+    pub end: NaiveTime,
+    pub title: String,
+    pub location: Option<String>,
+    pub organizer: Option<String>,
+    pub description: Option<String>,
+}
 
 impl Calendar {
     #[must_use]

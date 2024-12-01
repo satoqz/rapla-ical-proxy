@@ -8,8 +8,8 @@ use axum::Router;
 use chrono::{Datelike, Duration, Utc};
 use serde::Deserialize;
 
+use crate::calendar::Calendar;
 use crate::parser::{parse_calendar, ParseError};
-use crate::structs::Calendar;
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
