@@ -10,7 +10,7 @@ use crate::calendar::{Calendar, Event};
 
 #[derive(Serialize)]
 pub struct ParseError {
-    source_url: String,
+    source: String,
     #[serde(flatten)]
     details: ParseErrorDetails,
 }
@@ -23,7 +23,7 @@ pub enum ParseErrorDetails {
     Html { details: String, html: String },
 }
 
-macro_rules! source_url {
+macro_rules! source {
     () => {
         format!(
             "{}/blob/{}/{}#L{}",
@@ -38,7 +38,7 @@ macro_rules! source_url {
 macro_rules! generic_error {
     ($($arg:tt)*) => {
         ParseError {
-            source_url: source_url!(),
+            source: source!(),
             details: ParseErrorDetails::Generic(format!($($arg)*)),
         }
     };
@@ -47,7 +47,7 @@ macro_rules! generic_error {
 macro_rules! html_error {
     ($html:expr, $($arg:tt)*) => {
         ParseError {
-            source_url: source_url!(),
+            source: source!(),
             details: ParseErrorDetails::Html { details: format!($($arg)*), html: $html.to_owned() },
         }
     };
@@ -63,7 +63,7 @@ macro_rules! selector {
 macro_rules! select_first {
     ($element:expr, $query:expr) => {
         $element.select(selector!($query)).next().ok_or(ParseError {
-            source_url: source_url!(),
+            source: source!(),
             details: ParseErrorDetails::Select($query),
         })
     };
