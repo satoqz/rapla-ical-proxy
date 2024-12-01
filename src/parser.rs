@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::fmt::{self, Display};
 use std::ops::Not;
 
 use chrono::{Duration, NaiveDate, NaiveTime, Timelike};
@@ -8,19 +10,37 @@ use serde::Serialize;
 
 use crate::calendar::{Calendar, Event};
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ParseError {
     source: String,
     #[serde(flatten)]
     details: ParseErrorDetails,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum ParseErrorDetails {
-    Generic(String),
-    Select(&'static str),
+    Generic { details: String },
+    Select { query: &'static str },
     Html { details: String, html: String },
+}
+
+impl Error for ParseError {}
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.details)
+    }
+}
+
+impl Display for ParseErrorDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Generic { details } => write!(f, "{details}"),
+            Self::Select { query } => write!(f, "{query}"),
+            Self::Html { details, .. } => write!(f, "{details}"),
+        }
+    }
 }
 
 macro_rules! source {
@@ -46,7 +66,7 @@ macro_rules! error {
     ($($arg:tt)*) => {
         ParseError {
             source: source!(),
-            details: ParseErrorDetails::Generic(format!($($arg)*)),
+            details: ParseErrorDetails::Generic { details: format!($($arg)*) },
         }
     };
 }
@@ -60,7 +80,7 @@ macro_rules! select {
     ($element:expr, $query:expr, $method:ident) => {
         select!($element, $query).$method().ok_or(ParseError {
             source: source!(),
-            details: ParseErrorDetails::Select($query),
+            details: ParseErrorDetails::Select { query: $query },
         })
     };
 }

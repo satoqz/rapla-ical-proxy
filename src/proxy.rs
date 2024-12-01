@@ -1,3 +1,6 @@
+use std::error::Error;
+use std::fmt::Display;
+
 use axum::extract::{Path, RawQuery};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -10,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::calendar::Calendar;
 use crate::parser::{parse_calendar, ParseError};
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct ProxyError {
     /// Status code set when this is returned as a response.
     #[serde(skip)]
@@ -28,7 +31,7 @@ struct ProxyError {
     upstream: Option<UpstreamInfo>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct UpstreamInfo {
     /// Transformed upstream URL.
     url: String,
@@ -38,11 +41,32 @@ struct UpstreamInfo {
     status_code: Option<u16>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(untagged)]
 enum ProxyErrorDetails {
     Err { details: String },
     Parse(ParseError),
+}
+
+impl Error for ProxyError {}
+
+impl Display for ProxyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)?;
+        if let Some(details) = &self.details {
+            write!(f, ": {details}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for ProxyErrorDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Err { details } => write!(f, "{details}"),
+            Self::Parse(err) => write!(f, "{err}"),
+        }
+    }
 }
 
 impl IntoResponse for ProxyError {
