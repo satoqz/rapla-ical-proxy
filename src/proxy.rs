@@ -8,7 +8,7 @@ use axum::Router;
 use chrono::{Datelike, Duration, Utc};
 use serde::Deserialize;
 
-use crate::parser::parse_calendar;
+use crate::parser::{parse_calendar, ParseError};
 use crate::structs::Calendar;
 
 #[derive(Debug, Deserialize)]
@@ -27,14 +27,14 @@ impl Display for CalendarQuery {
     }
 }
 
-enum Error {
+enum ProxyError {
     UpstreamConnection(reqwest::Error),
     UpstreamStatus(String, reqwest::StatusCode),
     UpstreamBody(String),
-    Parse(String),
+    Parse(String, ParseError),
 }
 
-impl Error {
+impl ProxyError {
     fn status_code(&self) -> StatusCode {
         match self {
             Self::UpstreamConnection(_) => StatusCode::BAD_GATEWAY,
@@ -42,36 +42,41 @@ impl Error {
                 StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY)
             }
             Self::UpstreamBody(_) => StatusCode::BAD_GATEWAY,
-            Self::Parse(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Parse(_, _) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
 
-impl Display for Error {
+impl Display for ProxyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::UpstreamConnection(err) => write!(
+            ProxyError::UpstreamConnection(err) => write!(
                 f,
                 "Could not connect to upstream at {}",
                 err.url()
                     .map(ToString::to_string)
                     .unwrap_or_else(|| String::from("<No URL found?>"))
             ),
-            Error::UpstreamStatus(url, status) => {
+            ProxyError::UpstreamStatus(url, status) => {
                 write!(
                     f,
                     "Upstream returned unsuccessful status code {status} at {url}",
                 )
             }
-            Error::UpstreamBody(url) => {
+            ProxyError::UpstreamBody(url) => {
                 write!(f, "Upstream  returned invalid body at {url}")
             }
-            Error::Parse(url) => write!(f, "Upstream  returned HTML that did not parse at {url}"),
+            ProxyError::Parse(url, err) => {
+                write!(
+                    f,
+                    "Upstream  returned HTML that did not parse at {url}\nParse error: {err}"
+                )
+            }
         }
     }
 }
 
-impl IntoResponse for Error {
+impl IntoResponse for ProxyError {
     fn into_response(self) -> Response {
         (
             self.status_code(),
@@ -107,21 +112,23 @@ async fn handle_calendar(
 ) -> impl IntoResponse {
     let (url, start_year) = generate_upstream_url(calendar_path, query);
     let html = fetch_html(&url).await?;
-    parse_calendar(&html, start_year).ok_or_else(|| Error::Parse(url.clone()))
+    parse_calendar(&html, start_year).map_err(|err| ProxyError::Parse(url.clone(), err))
 }
 
-async fn fetch_html(url: &str) -> Result<String, Error> {
-    let response = reqwest::get(url).await.map_err(Error::UpstreamConnection)?;
+async fn fetch_html(url: &str) -> Result<String, ProxyError> {
+    let response = reqwest::get(url)
+        .await
+        .map_err(ProxyError::UpstreamConnection)?;
     let response_status = response.status();
 
     if !response_status.is_success() {
-        return Err(Error::UpstreamStatus(url.into(), response_status));
+        return Err(ProxyError::UpstreamStatus(url.into(), response_status));
     }
 
     response
         .text()
         .await
-        .map_err(|_| Error::UpstreamBody(url.into()))
+        .map_err(|_| ProxyError::UpstreamBody(url.into()))
 }
 
 fn generate_upstream_url(calendar_path: String, query: CalendarQuery) -> (String, i32) {
