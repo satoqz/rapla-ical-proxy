@@ -22,6 +22,10 @@ async fn logging_middleware(
 ) -> Response {
     let request_id = request_counter.fetch_add(1, Ordering::Relaxed);
     let request_url = request.uri().to_string();
+    let user_agent = request
+        .headers()
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok().map(|v| v.to_owned()));
 
     let start_time = Instant::now();
     let response = next.run(request).await;
@@ -31,6 +35,7 @@ async fn logging_middleware(
         "status_code": response.status().as_u16(),
         "cached": response.headers().get("x-cache-age").is_some(),
         "processing_time": Instant::now().duration_since(start_time).as_secs_f64(),
+        "user_agent": user_agent,
         "url": request_url,
     });
 
