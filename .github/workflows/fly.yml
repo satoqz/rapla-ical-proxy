@@ -3,10 +3,9 @@ name: fly
 on:
   workflow_dispatch:
     inputs:
-      sha:
+      commit_sha:
         type: string
         required: false
-        description: Deploy container image built from a specific commit
 
 jobs:
   deploy:
@@ -23,7 +22,7 @@ jobs:
 
       - name: Deploy to Fly.io
         run: |
-          tag="${{ inputs.sha }}"
+          tag="${{ inputs.commit_sha }}"
           if [[ "$tag" = "" ]]; then
             # Fall back to whatever is checked out as default
             tag="${{ github.sha }}"
