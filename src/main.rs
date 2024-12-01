@@ -12,10 +12,30 @@ use axum::Router;
 use tokio::net::TcpListener;
 use tokio::signal;
 
-#[tokio::main]
-async fn main() -> io::Result<()> {
+use crate::cli::Args;
+
+fn main() -> io::Result<()> {
+    let sentry = sentry::init(sentry::ClientOptions {
+        release: Some(env!("GIT_COMMIT_HASH").into()),
+        ..Default::default()
+    });
+
     let args = crate::cli::parse(env::args().skip(1).collect());
 
+    eprintln!("Listening on address:    {}", args.address);
+    eprintln!("Caching enabled:         {}", args.cache_enable);
+    eprintln!("Cache time to live:      {}s", args.cache_ttl.as_secs());
+    eprintln!("Cache max size:          {}mb", args.cache_max_size);
+    eprintln!("Sentry enabled:          {}", sentry.is_enabled());
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(main_impl(args))
+}
+
+async fn main_impl(args: Args) -> io::Result<()> {
     let router = Router::new().nest(
         "/rapla",
         crate::proxy::router(args.cache_enable.then_some(crate::cache::Config {
@@ -25,12 +45,6 @@ async fn main() -> io::Result<()> {
     );
 
     let listener = TcpListener::bind(args.address).await?;
-
-    eprintln!("Listening on address:    {}", args.address);
-    eprintln!("Caching enabled:         {}", args.cache_enable);
-    eprintln!("Cache time to live:      {}s", args.cache_ttl.as_secs());
-    eprintln!("Cache max size:          {}mb", args.cache_max_size);
-
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())
         .await
