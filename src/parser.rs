@@ -140,10 +140,17 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
         let mut day_index = 0;
 
         for column in row.select(selector!("td")) {
-            match column.value().classes().next() {
-                Some(class) if class.starts_with("week_separatorcell") => day_index += 1,
-                Some(class) if class != "week_block" => continue,
-                _ => {}
+            let class = column
+                .value()
+                .classes()
+                .next()
+                .ok_or(parse_error!("expected 'td' element to have a class"))?;
+
+            if class.starts_with("week_separatorcell") {
+                day_index += 1;
+            }
+            if class != "week_block" {
+                continue;
             }
 
             let date = monday + Duration::try_days(day_index).ok_or(parse_error!(""))?;
