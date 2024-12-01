@@ -161,7 +161,9 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
 }
 
 fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, ParseError> {
-    let details = select!(element, "a", next)?.inner_html();
+    // Sometimes there is an extra <span class="link"> wrapper around the content we're after.
+    // We pick last element to ensure we have the innermost matched element.
+    let details = select!(element, ":is(a, span.link)", last)?.inner_html();
     let mut details_split = details.split("<br>");
 
     let times_raw = details_split.next().ok_or(html_error!(
