@@ -106,13 +106,13 @@ pub fn parse_calendar(s: &str, mut start_year: i32) -> Result<Calendar, ParseErr
 }
 
 fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseError> {
-    let start_date_raw = select_first!(element, "tr > td.week_header > nobr")?.inner_html();
+    let week_header = select_first!(element, "tr > td.week_header > nobr")?.inner_html();
 
-    let day_month = start_date_raw
+    let day_month = week_header
         .split(' ')
         .nth(1)
         .ok_or_else(|| {
-            parse_error!("failed to find day and month in week header `{start_date_raw}`: missing second element after splitting by space")
+            parse_error!("failed to find day and month in week header '{week_header}': missing second element after splitting by space")
         })?
         .trim_end_matches('.')
         .split('.')
@@ -120,26 +120,29 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
 
     if day_month.len() != 2 {
         return Err(parse_error!(
-            "expected day + month information in week header `{start_date_raw}` to consist of two elements when splitting by dots")
+            "expected day + month information in week header '{week_header}' to consist of two elements when splitting by dots")
         );
     }
 
-    let start_day = day_month[0].parse::<u32>().map_err(|_| parse_error!(""))?;
-    let start_month = day_month[1].parse::<u32>().map_err(|_| parse_error!(""))?;
-    let monday =
-        NaiveDate::from_ymd_opt(start_year, start_month, start_day).ok_or(parse_error!(""))?;
+    let start_day = day_month[0]
+        .parse::<u32>()
+        .map_err(|err| parse_error!("failed to parse day in week header '{week_header}': {err}"))?;
+    let start_month = day_month[1].parse::<u32>().map_err(|err| {
+        parse_error!("failed to parse month in week header '{week_header}': {err}")
+    })?;
+    let monday = NaiveDate::from_ymd_opt(start_year, start_month, start_day).ok_or(
+        parse_error!("week start date '{start_day}.{start_month}.{start_year}' derived from week header '{week_header}' appears to be an invalid date"),
+    )?;
 
     let mut events = Vec::new();
     for row in element.select(selector!("tr")).skip(1) {
         let mut day_index = 0;
 
         for column in row.select(selector!("td")) {
-            let class = column.value().classes().next().ok_or(parse_error!(""))?;
-            if class.starts_with("week_separatorcell") {
-                day_index += 1;
-            }
-            if class != "week_block" {
-                continue;
+            match column.value().classes().next() {
+                Some(class) if class.starts_with("week_separatorcell") => day_index += 1,
+                Some(class) if class != "week_block" => continue,
+                _ => {}
             }
 
             let date = monday + Duration::try_days(day_index).ok_or(parse_error!(""))?;
