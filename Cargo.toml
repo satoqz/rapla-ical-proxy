@@ -5,7 +5,7 @@ edition = "2021"
 repository = "https://github.com/satoqz/rapla-ical-proxy"
 
 [dependencies]
-axum = { version = "0.7.9", default-features = false, features = ["tokio", "http1", "http2", "query"] }
+axum = { version = "0.7.9", default-features = false, features = ["tokio", "http1", "http2", "json"] }
 chrono = { version = "0.4.35", default-features = false, features = ["std", "now"] }
 getopts = "0.2.21"
 html-escape = "0.2.13"
@@ -15,6 +15,7 @@ quick_cache = "0.6.9"
 reqwest = { version = "0.12.3", default-features = false, features = ["rustls-tls-native-roots", "charset"] }
 scraper = { version = "0.21.0", default-features = false }
 serde = { version = "1.0.197", features = ["derive"] }
+serde_urlencoded = "0.7.1"
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros", "signal"] }
 
 [profile.release]

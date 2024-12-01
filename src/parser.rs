@@ -1,36 +1,26 @@
-use std::fmt::{self, Display};
 use std::ops::Not;
 
 use chrono::{Duration, NaiveDate, NaiveTime, Timelike};
 use html_escape::decode_html_entities;
 use once_cell::sync::Lazy;
 use scraper::{ElementRef, Html, Selector};
+use serde::Serialize;
 
 use crate::calendar::{Calendar, Event};
 
+#[derive(Serialize)]
 pub struct ParseError {
-    location: String,
-    kind: ParseErrorKind,
+    source_url: String,
+    #[serde(flatten)]
+    details: ParseErrorDetails,
 }
 
-pub enum ParseErrorKind {
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum ParseErrorDetails {
     Generic(String),
     Select(&'static str),
-}
-
-impl Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            ParseErrorKind::Generic(message) => {
-                write!(f, "{message} (source location: {})", self.location)
-            }
-            ParseErrorKind::Select(query) => write!(
-                f,
-                "query '{query}' didn't return any elements (source location: {})",
-                self.location
-            ),
-        }
-    }
+    Html { details: String, html: String },
 }
 
 macro_rules! source_url {
@@ -45,11 +35,20 @@ macro_rules! source_url {
     };
 }
 
-macro_rules! parse_error {
+macro_rules! generic_error {
     ($($arg:tt)*) => {
         ParseError {
-            location: source_url!(),
-            kind: ParseErrorKind::Generic(format!($($arg)*)),
+            source_url: source_url!(),
+            details: ParseErrorDetails::Generic(format!($($arg)*)),
+        }
+    };
+}
+
+macro_rules! html_error {
+    ($html:expr, $($arg:tt)*) => {
+        ParseError {
+            source_url: source_url!(),
+            details: ParseErrorDetails::Html { details: format!($($arg)*), html: $html.to_owned() },
         }
     };
 }
@@ -64,8 +63,8 @@ macro_rules! selector {
 macro_rules! select_first {
     ($element:expr, $query:expr) => {
         $element.select(selector!($query)).next().ok_or(ParseError {
-            location: source_url!(),
-            kind: ParseErrorKind::Select($query),
+            source_url: source_url!(),
+            details: ParseErrorDetails::Select($query),
         })
     };
 }
@@ -82,18 +81,18 @@ pub fn parse_calendar(s: &str, mut start_year: i32) -> Result<Calendar, ParseErr
         .select(selector!("div.calendar > table.week_table > tbody"))
         .enumerate()
     {
-        let week_number = select_first!(week_element, "th.week_number")?
-            .inner_html()
-            .split(' ')
+        let week_number_html = select_first!(week_element, "th.week_number")?.inner_html();
+        let week_number = week_number_html.split(' ')
             .nth(1)
             .ok_or_else(|| {
-                parse_error!(
+                html_error!(
+                    week_number_html,
                     "malformed calendar week number in week #{}: missing second element after splitting by space",
                     idx + 1
                 )
             })?
             .parse::<usize>()
-            .map_err(|err| parse_error!("malformed calendar week number in week #{}: {err}", idx + 1))?;
+            .map_err(|err| html_error!(week_number_html, "malformed calendar week number in week #{}: {err}", idx + 1))?;
 
         if week_number == 1 && idx > 0 {
             start_year += 1;
@@ -113,26 +112,27 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
         .split(' ')
         .nth(1)
         .ok_or_else(|| {
-            parse_error!("couldn't find day and month in week header '{week_header}': missing second element after splitting by space")
+            html_error!(week_header, "couldn't find day and month in week header: missing second element after splitting by space")
         })?
         .trim_end_matches('.')
         .split('.')
         .collect::<Vec<_>>();
 
     if day_month.len() != 2 {
-        return Err(parse_error!(
-            "expected day + month information in week header '{week_header}' to consist of two elements when splitting by dots")
+        return Err(html_error!(
+            week_header,
+            "expected day + month information in week header to consist of two elements when splitting by dots")
         );
     }
 
     let start_day = day_month[0]
         .parse::<u32>()
-        .map_err(|err| parse_error!("couldn't parse day in week header '{week_header}': {err}"))?;
-    let start_month = day_month[1].parse::<u32>().map_err(|err| {
-        parse_error!("couldn't parse month in week header '{week_header}': {err}")
-    })?;
+        .map_err(|err| html_error!(week_header, "couldn't parse day in week header: {err}"))?;
+    let start_month = day_month[1]
+        .parse::<u32>()
+        .map_err(|err| html_error!(week_header, "couldn't parse month in week header: {err}"))?;
     let monday = NaiveDate::from_ymd_opt(start_year, start_month, start_day).ok_or(
-        parse_error!("week start date '{start_day}.{start_month}.{start_year}' derived from week header '{week_header}' appears to be an invalid date"),
+        html_error!(week_header, "week start date '{start_day}.{start_month}.{start_year}' derived from week header appears to be an invalid date"),
     )?;
 
     let mut events = Vec::new();
@@ -140,11 +140,10 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
         let mut day_index = 0;
 
         for column in row.select(selector!("td")) {
-            let class = column
-                .value()
-                .classes()
-                .next()
-                .ok_or(parse_error!("expected 'td' element to have a class"))?;
+            let class = column.value().classes().next().ok_or(html_error!(
+                column.html(),
+                "expected element to have a class"
+            ))?;
 
             if class.starts_with("week_separatorcell") {
                 day_index += 1;
@@ -153,7 +152,11 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
                 continue;
             }
 
-            let date = monday + Duration::try_days(day_index).ok_or(parse_error!(""))?;
+            let date = monday
+                + Duration::try_days(day_index).ok_or(generic_error!(
+                    "overflowed date value, something is very wrong"
+                ))?;
+
             events.push(parse_event_details(column, date)?);
         }
     }
@@ -165,22 +168,23 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, Pa
     let details = select_first!(element, "a")?.inner_html();
     let mut details_split = details.split("<br>");
 
-    let times_raw = details_split.next().ok_or(parse_error!(
-        "couldn't find time range in event details '{details}'"
+    let times_raw = details_split.next().ok_or(html_error!(
+        details,
+        "couldn't find time range in event details"
     ))?;
     let mut times_raw_split = times_raw.split("&nbsp;-");
 
     let mut start = NaiveTime::parse_from_str(
         times_raw_split
             .next()
-            .ok_or(parse_error!("missing event start time in '{times_raw}'"))?,
+            .ok_or(html_error!(times_raw, "missing event start time"))?,
         "%H:%M",
     )
-    .map_err(|err| parse_error!("couldn't parse event start time from '{times_raw}': {err}"))?;
+    .map_err(|err| html_error!(times_raw, "couldn't parse event start time: {err}"))?;
 
     let end_time_raw = times_raw_split
         .next()
-        .ok_or(parse_error!("missing event end time in '{times_raw}'"))?;
+        .ok_or(html_error!(times_raw, "missing event end time in"))?;
     // Some genuises at DHBW find it a great idea to leave out the end time
     // to signify "full day" which is to be interpreted as "until 18:00".
     // THEY EVEN KEEP THE DASH AFTER THE START TIME AS BAIT :(
@@ -188,9 +192,8 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, Pa
         // The sheer idea of the above irritates me so much that I'll unwrap here.
         NaiveTime::from_hms_opt(18, 0, 0).unwrap()
     } else {
-        NaiveTime::parse_from_str(end_time_raw, "%H:%M").map_err(|err| {
-            parse_error!("couldn't parse event end time from '{times_raw}': {err}")
-        })?
+        NaiveTime::parse_from_str(end_time_raw, "%H:%M")
+            .map_err(|err| html_error!(times_raw, "couldn't parse event end time: {err}"))?
     };
     // Also, they will set the start time to 00:00 when it's actually supposed to be 08:00.
     // At least that's how it's displayed on the website.
@@ -201,7 +204,7 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, Pa
 
     let title = details_split
         .next()
-        .ok_or_else(|| parse_error!("couldn't find event title in '{details}'"))?;
+        .ok_or_else(|| html_error!(details, "couldn't find event title"))?;
     let title = decode_html_entities(title).to_string();
 
     let resources = element
