@@ -39,7 +39,7 @@ async fn logging_middleware(
     };
 
     buf.push(b'\n');
-    match io::stderr().lock().write_all(&buf) {
-        _ => response,
-    }
+    let _ = io::stderr().lock().write_all(&buf);
+
+    response
 }
