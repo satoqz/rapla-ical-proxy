@@ -132,7 +132,7 @@ async fn fetch_html(url: &str) -> Result<String, ProxyError> {
 }
 
 fn generate_upstream_url(calendar_path: String, query: CalendarQuery) -> (String, i32) {
-    // these don't need to be 100% accurate
+    // These don't need to be 100% accurate.
     const WEEKS_TWO_YEARS: usize = 104;
     const DAYS_ONE_YEAR: i64 = 365;
 

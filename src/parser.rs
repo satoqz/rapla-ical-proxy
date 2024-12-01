@@ -185,7 +185,7 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, Pa
     // to signify "full day" which is to be interpreted as "until 18:00".
     // THEY EVEN KEEP THE DASH AFTER THE START TIME AS BAIT :(
     let end = if end_time_raw.is_empty() {
-        // The sheer idea of the above irritates me to much that I'll unwrap here
+        // The sheer idea of the above irritates me to much that I'll unwrap here.
         NaiveTime::from_hms_opt(18, 0, 0).unwrap()
     } else {
         NaiveTime::parse_from_str(end_time_raw, "%H:%M").map_err(|err| {
