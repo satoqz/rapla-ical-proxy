@@ -62,11 +62,14 @@ impl IntoResponse for Calendar {
 
 pub fn router(cache_config: Option<crate::cache::Config>) -> Router {
     let router = Router::new().route("/:calendar_path", get(handle_calendar));
-    if let Some(cache_config) = cache_config {
+
+    let router = if let Some(cache_config) = cache_config {
         crate::cache::apply_middleware(router, cache_config)
     } else {
         router
-    }
+    };
+
+    crate::logging::apply_middleware(router)
 }
 
 #[derive(Serialize, Deserialize)]

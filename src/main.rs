@@ -1,6 +1,7 @@
 mod cache;
 mod calendar;
 mod cli;
+mod logging;
 mod parser;
 mod proxy;
 
