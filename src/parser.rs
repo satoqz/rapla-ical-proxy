@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 use std::ops::Not;
 
 use chrono::{Duration, NaiveDate, NaiveTime};
+use html_escape::decode_html_entities;
 use once_cell::sync::Lazy;
 use scraper::{ElementRef, Html, Selector};
 
@@ -25,7 +26,7 @@ impl Display for ParseError {
             }
             ParseErrorKind::Select(query) => write!(
                 f,
-                "query `{query}` resulted in no elements (source location: {})",
+                "query '{query}' didn't return any elements (source location: {})",
                 self.location
             ),
         }
@@ -112,7 +113,7 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
         .split(' ')
         .nth(1)
         .ok_or_else(|| {
-            parse_error!("failed to find day and month in week header '{week_header}': missing second element after splitting by space")
+            parse_error!("couldn't find day and month in week header '{week_header}': missing second element after splitting by space")
         })?
         .trim_end_matches('.')
         .split('.')
@@ -126,9 +127,9 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
 
     let start_day = day_month[0]
         .parse::<u32>()
-        .map_err(|err| parse_error!("failed to parse day in week header '{week_header}': {err}"))?;
+        .map_err(|err| parse_error!("couldn't parse day in week header '{week_header}': {err}"))?;
     let start_month = day_month[1].parse::<u32>().map_err(|err| {
-        parse_error!("failed to parse month in week header '{week_header}': {err}")
+        parse_error!("couldn't parse month in week header '{week_header}': {err}")
     })?;
     let monday = NaiveDate::from_ymd_opt(start_year, start_month, start_day).ok_or(
         parse_error!("week start date '{start_day}.{start_month}.{start_year}' derived from week header '{week_header}' appears to be an invalid date"),
@@ -157,33 +158,44 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, Pa
     let details = select_first!(element, "a")?.inner_html();
     let mut details_split = details.split("<br>");
 
-    let times_raw = details_split.next().ok_or(parse_error!(""))?;
+    let times_raw = details_split.next().ok_or(parse_error!(
+        "couldn't find time range in event details '{details}'"
+    ))?;
     let mut times_raw_split = times_raw.split("&nbsp;-");
 
-    let start = NaiveTime::parse_from_str(times_raw_split.next().ok_or(parse_error!(""))?, "%H:%M")
-        .map_err(|_| parse_error!(""))?;
-    let end = NaiveTime::parse_from_str(times_raw_split.next().ok_or(parse_error!(""))?, "%H:%M")
-        .map_err(|_| parse_error!(""))?;
+    let start = NaiveTime::parse_from_str(
+        times_raw_split
+            .next()
+            .ok_or(parse_error!("missing event start time in '{times_raw}'"))?,
+        "%H:%M",
+    )
+    .map_err(|err| parse_error!("couldn't parse event start time from '{times_raw}': {err}"))?;
+
+    let end = NaiveTime::parse_from_str(
+        times_raw_split
+            .next()
+            .ok_or(parse_error!("missing event end time in '{times_raw}'"))?,
+        "%H:%M",
+    )
+    .map_err(|err| parse_error!("couldn't parse event end time from '{times_raw}': {err}"))?;
 
     let title = details_split
         .next()
-        .ok_or(parse_error!(""))?
-        .replace("&amp;", "&");
+        .ok_or_else(|| parse_error!("couldn't find event title in '{details}'"))?;
+    let title = decode_html_entities(title).to_string();
 
     let resources = element
         .select(selector!("span.resource"))
-        .map(|location| location.inner_html())
+        .map(|location| decode_html_entities(&location.inner_html()).to_string())
         .collect::<Vec<_>>();
-
     let location = resources.last().cloned();
+    let description = resources.is_empty().not().then(|| resources.join(", "));
 
     let persons = element
         .select(selector!("span.person"))
-        .map(|person| person.inner_html())
+        .map(|person| decode_html_entities(&person.inner_html()).to_string())
         .collect::<Vec<_>>();
-
     let organizer = persons.is_empty().not().then(|| persons.join(", "));
-    let description = resources.is_empty().not().then(|| resources.join(", "));
 
     Ok(Event {
         date,
