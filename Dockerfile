@@ -10,4 +10,4 @@ USER 65532:65532
 EXPOSE 8080
 
 ENTRYPOINT [ "rapla-ical-proxy" ]
-CMD [ "--address=0.0.0.0:8080", "--cache-enable" ]
+CMD [ "--address=0.0.0.0:8080", "--cache" ]

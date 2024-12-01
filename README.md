@@ -36,7 +36,7 @@ You can easily deploy the proxy yourself using the container image built by GitH
 docker run -p 8080:8080 ghcr.io/satoqz/rapla-ical-proxy
 ```
 
-You can customize address/port configuration and caching behavior using command line flags. To list available options, run:
+You can customize address/port configuration and caching behavior using command line flags and/or environment variables. To list available options, run:
 
 ```sh
 docker run ghcr.io/satoqz/rapla-ical-proxy --help
