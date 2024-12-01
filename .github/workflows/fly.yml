@@ -2,6 +2,11 @@ name: fly
 
 on:
   workflow_dispatch:
+    inputs:
+      sha:
+        type: string
+        required: false
+        description: Deploy container image built from a specific commit
 
 jobs:
   deploy:
@@ -17,6 +22,12 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
 
       - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only
+        run: |
+          tag="${{ inputs.sha }}"
+          if [[ "$tag" = "" ]]; then
+            # Fall back to whatever is checked out as default
+            tag="${{ github.sha }}"
+          fi
+          flyctl deploy -i "ghcr.io/${{ github.repository }}:$tag"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
