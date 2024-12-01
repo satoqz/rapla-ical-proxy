@@ -53,16 +53,14 @@ macro_rules! html_error {
     };
 }
 
-macro_rules! selector {
-    ($query:expr) => {{
+macro_rules! select {
+    ($element:expr, $query:expr) => {{
         static SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse($query).unwrap());
-        &SELECTOR
+        $element.select(&SELECTOR)
     }};
-}
 
-macro_rules! select_first {
-    ($element:expr, $query:expr) => {
-        $element.select(selector!($query)).next().ok_or(ParseError {
+    ($element:expr, $query:expr, $method:ident) => {
+        select!($element, $query).$method().ok_or(ParseError {
             source: source!(),
             details: ParseErrorDetails::Select($query),
         })
@@ -71,17 +69,15 @@ macro_rules! select_first {
 
 pub fn parse_calendar(s: &str, mut start_year: i32) -> Result<Calendar, ParseError> {
     let html = Html::parse_document(s);
-    let name = select_first!(html, "title")?
+    let name = select!(html, "title", next)?
         .inner_html()
         .trim()
         .to_string();
 
     let mut events = Vec::new();
-    for (idx, week_element) in html
-        .select(selector!("div.calendar > table.week_table > tbody"))
-        .enumerate()
+    for (idx, week_element) in select!(html, "div.calendar > table.week_table > tbody").enumerate()
     {
-        let week_number_html = select_first!(week_element, "th.week_number")?.inner_html();
+        let week_number_html = select!(week_element, "th.week_number", next)?.inner_html();
         let week_number = week_number_html.split(' ')
             .nth(1)
             .ok_or_else(|| {
@@ -106,7 +102,7 @@ pub fn parse_calendar(s: &str, mut start_year: i32) -> Result<Calendar, ParseErr
 }
 
 fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseError> {
-    let week_header = select_first!(element, "tr > td.week_header > nobr")?.inner_html();
+    let week_header = select!(element, "tr > td.week_header > nobr", next)?.inner_html();
 
     let day_month = week_header
         .split(' ')
@@ -136,10 +132,10 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
     )?;
 
     let mut events = Vec::new();
-    for row in element.select(selector!("tr")).skip(1) {
+    for row in select!(element, "tr").skip(1) {
         let mut day_index = 0;
 
-        for column in row.select(selector!("td")) {
+        for column in select!(row, "td") {
             let class = column.value().classes().next().ok_or(html_error!(
                 column.html(),
                 "expected element to have a class"
@@ -165,7 +161,7 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>, ParseE
 }
 
 fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, ParseError> {
-    let details = select_first!(element, "a")?.inner_html();
+    let details = select!(element, "a", next)?.inner_html();
     let mut details_split = details.split("<br>");
 
     let times_raw = details_split.next().ok_or(html_error!(
@@ -207,15 +203,13 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event, Pa
         .ok_or_else(|| html_error!(details, "couldn't find event title"))?;
     let title = decode_html_entities(title).to_string();
 
-    let resources = element
-        .select(selector!("span.resource"))
+    let resources = select!(element, "span.resource")
         .map(|location| decode_html_entities(&location.inner_html()).to_string())
         .collect::<Vec<_>>();
     let location = resources.last().cloned();
     let description = resources.is_empty().not().then(|| resources.join(", "));
 
-    let persons = element
-        .select(selector!("span.person"))
+    let persons = select!(element, "span.person")
         .map(|person| decode_html_entities(&person.inner_html()).to_string())
         .collect::<Vec<_>>();
     let organizer = persons.is_empty().not().then(|| persons.join(", "));
