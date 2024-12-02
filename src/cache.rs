@@ -1,6 +1,5 @@
 use std::mem;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
@@ -11,8 +10,12 @@ use axum::response::{IntoResponse, Response};
 use axum::Router;
 use quick_cache::sync::Cache;
 use quick_cache::Weighter;
+use tokio::task;
+use tokio::time::{self, Duration, Instant};
 
-#[derive(Clone)]
+const CACHE_AGE_HEADER: &str = "x-cache-age";
+
+#[derive(Debug, Clone)]
 struct CachedResponse {
     parts: Parts,
     body: Bytes,
@@ -39,7 +42,7 @@ impl IntoResponse for CachedResponse {
         let age = self.timestamp.elapsed().as_secs().to_string();
         let headers = response.headers_mut();
         headers.insert(
-            "x-cache-age",
+            CACHE_AGE_HEADER,
             age.parse().expect("header value did not parse"),
         );
 
@@ -57,11 +60,13 @@ impl Weighter<String, CachedResponse> for CachedResponseWeighter {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Config {
     pub ttl: Duration,
     pub max_size: u64,
 }
 
+#[derive(Debug)]
 struct MiddlewareState {
     cache: Cache<String, CachedResponse, CachedResponseWeighter>,
     ttl: Duration,
@@ -87,12 +92,11 @@ async fn cache_middleware(
     next: Next,
 ) -> Response {
     let key = uri.to_string();
-    let now = Instant::now();
 
-    match state.cache.get(&key) {
-        Some(cached) if (now - cached.timestamp) < state.ttl => return cached.into_response(),
-        _ => {}
-    }
+    let placeholder = match state.cache.get_value_or_guard_async(&key).await {
+        Ok(cached) => return cached.into_response(),
+        Err(placeholder) => placeholder,
+    };
 
     let response = next.run(request).await;
     let decomposed = decompose_response(response).await;
@@ -100,6 +104,28 @@ async fn cache_middleware(
     // We're fine caching responses no matter the status. If things recover to normal automatically, just wait out the TTL.
     // If a fix needs to be pushed from our side, we're redeploying and thereby clearing the cache anyways.
     // Caching errored responses saves additional calls to upstream and parsing CPU time for paths that are most likely permanent fails anyways.
-    state.cache.insert(key, decomposed.clone());
+
+    // "Returns Err if the placeholder isn't in the cache anymore.
+    // A placeholder can be removed as a result of a remove call or a non-placeholder insert with the same key."
+    // This is the only place that we ever insert (locked by key). Additionally, the whole reason we're here
+    // is that remove was called, and that we're about to schedule a new remove call.
+    // TLDR; the unwrap should be fine.
+    placeholder.insert(decomposed.clone()).unwrap();
+
+    // Remove key from the cache once the TTL is expired.
+    // Alternatively we could choose to do this whenever a value is fetched from
+    // the cache and we notice that it has expired, but that encomplicates using
+    // quick_cache's get_value_or_guard functionality and has other tradeoffs.
+    task::spawn(async move {
+        time::sleep(state.ttl).await;
+        let now = Instant::now();
+        // Ensure that we're removing only what was inserted above.
+        // The cache could have evicted the entry itself because it got too large,
+        // and a newer entry might already be in place. We don't want to remove that.
+        if decomposed.timestamp + state.ttl <= now {
+            state.cache.remove(&key);
+        }
+    });
+
     Response::from_parts(decomposed.parts, Body::from(decomposed.body))
 }

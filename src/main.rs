@@ -6,12 +6,12 @@ mod proxy;
 
 use std::io;
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use axum::Router;
 use clap::Parser;
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio::time::Duration;
 
 #[derive(Parser)]
 struct Args {
