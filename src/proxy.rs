@@ -1,77 +1,57 @@
-use std::error::Error;
-use std::fmt::Display;
+use std::error::Error as StdError;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use axum::extract::{Path, RawQuery};
-use axum::http::StatusCode;
+use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::Router;
 use chrono::{Datelike, Duration, Utc};
-use reqwest::Client;
+use reqwest::{Client, Error as ReqwestError, StatusCode};
+use sentry::protocol::Map;
+use sentry::Breadcrumb;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::calendar::Calendar;
 use crate::parser::{parse_calendar, ParseError};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 struct ProxyError {
-    /// Status code set when this is returned as a response.
-    #[serde(skip)]
-    status_code: StatusCode,
-
-    /// Generic message describing the kind of error.
     message: &'static str,
-
-    /// Specific error information.
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    details: Option<ProxyErrorDetails>,
-
-    /// What did upstream return so I don't have to check?
-    #[serde(skip_serializing_if = "Option::is_none")]
-    upstream: Option<UpstreamInfo>,
+    kind: ProxyErrorKind,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct UpstreamInfo {
-    /// Transformed upstream URL.
-    url: String,
-
-    /// Status code we got from upstream.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    status_code: Option<u16>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum ProxyErrorDetails {
-    Err { details: String },
+#[derive(Debug)]
+enum ProxyErrorKind {
+    Reqwest(ReqwestError),
+    Status(StatusCode),
     Parse(ParseError),
 }
 
-impl Error for ProxyError {}
-
-impl Display for ProxyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)?;
-        if let Some(details) = &self.details {
-            write!(f, ": {details}")?;
-        }
-        Ok(())
+impl ProxyError {
+    pub fn new(message: &'static str, kind: ProxyErrorKind) -> Self {
+        Self { message, kind }
     }
 }
 
-impl Display for ProxyErrorDetails {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Err { details } => write!(f, "{details}"),
-            Self::Parse(err) => write!(f, "{err}"),
+impl StdError for ProxyError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match &self.kind {
+            ProxyErrorKind::Reqwest(err) => Some(err),
+            ProxyErrorKind::Parse(err) => Some(err),
+            ProxyErrorKind::Status(_) => None,
         }
+    }
+}
+
+impl Display for ProxyError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", self.message)
     }
 }
 
 impl ProxyError {
-    fn sentry_capture(self) -> Self {
-        #[cfg(feature = "sentry")]
+    fn capture(self) -> Self {
         sentry::capture_error(&self);
         self
     }
@@ -79,7 +59,18 @@ impl ProxyError {
 
 impl IntoResponse for ProxyError {
     fn into_response(self) -> Response {
-        (self.status_code, Json(self)).into_response()
+        let status = match self.kind {
+            ProxyErrorKind::Reqwest(_) => StatusCode::BAD_GATEWAY,
+            ProxyErrorKind::Parse(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ProxyErrorKind::Status(status) => status, // Propagate whatever issue they're having.
+        };
+
+        (
+            status,
+            [("content-type", "text/plain")],
+            format!("Error: {self}"),
+        )
+            .into_response()
     }
 }
 
@@ -112,63 +103,73 @@ enum CalendarQuery {
     V2 { user: String, file: String },
 }
 
+fn breadcrumb(message: &str, ty: &str, data: Map<String, Value>) {
+    sentry::add_breadcrumb(Breadcrumb {
+        ty: ty.into(),
+        category: Some("proxy".into()),
+        message: Some(message.into()),
+        data,
+        ..Default::default()
+    });
+}
+
 async fn handle_calendar(
     Path(calendar_path): Path<String>,
-    RawQuery(raw_query): RawQuery,
+    Query(query): Query<CalendarQuery>,
 ) -> impl IntoResponse {
-    let query = serde_urlencoded::from_str(&raw_query.unwrap_or_default()).map_err(|_| ProxyError {
-        status_code: StatusCode::BAD_REQUEST,
-        upstream: None,
-        message: "bad query parameters: your URL either isn't a valid Rapla calendar URL or this service doesn't handle it yet",
-        details: Some(ProxyErrorDetails::Err { details: "your URL needs to have either the 'key' and 'salt' parameters or the 'user' and 'file' parameters".into() }),
-    })?;
+    breadcrumb("Incoming request", "default", {
+        Map::from_iter(match serde_json::to_value(&query).unwrap() {
+            Value::Object(obj) => obj.into_iter(),
+            _ => unreachable!(),
+        })
+    });
 
     let (url, start_year) = generate_upstream_url(calendar_path, query);
 
-    let upstream_response = send_request(&url).await?;
-    let upstream_status = upstream_response.status();
+    breadcrumb("Sending request to Rapla", "http", {
+        let mut map = Map::new();
+        map.insert("method".into(), "GET".into());
+        map.insert("url".into(), url.clone().into());
+        map
+    });
 
-    let upstream_info = || {
-        Some(UpstreamInfo {
-            url: url.clone(),
-            status_code: Some(upstream_status.as_u16()),
-        })
-    };
+    let response = send_request(&url).await?;
+    let status = response.status();
 
-    if !upstream_status.is_success() {
-        return Err(ProxyError {
-            status_code: upstream_status, // Propagate whatever issue they're having.
-            upstream: upstream_info(),
-            message: "upstream returned bad status code",
-            details: None,
-        });
+    breadcrumb("Got response from Rapla", "http", {
+        let mut map = Map::new();
+        map.insert("method".into(), "GET".into());
+        map.insert("url".into(), url.clone().into());
+        map.insert("status_code".into(), status.as_u16().into());
+        map
+    });
+
+    if !status.is_success() {
+        return Err(ProxyError::new(
+            "Upstream returned bad status code",
+            ProxyErrorKind::Status(status),
+        ));
     }
 
-    let html = upstream_response.text().await.map_err(|err| {
-        ProxyError {
-            status_code: StatusCode::BAD_GATEWAY,
-            upstream: upstream_info(),
-            message: "couldn't parse body returned by upstream",
-            details: Some(ProxyErrorDetails::Err {
-                details: err.without_url().to_string(),
-            }),
-        }
+    let html = response.text().await.map_err(|err| {
+        ProxyError::new(
+            "Couldn't parse body returned by upstream",
+            ProxyErrorKind::Reqwest(err),
+        )
         // I'd be curious to know if this ever occurs.
-        .sentry_capture()
+        .capture()
     })?;
 
     parse_calendar(&html, start_year).map_err(|err| {
-        ProxyError {
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            upstream: upstream_info(),
-            message: "couldn't parse HTML returned by upstream",
-            details: Some(ProxyErrorDetails::Parse(err)),
-        }
+        ProxyError::new(
+            "Couldn't parse HTML returned by upstream",
+            ProxyErrorKind::Parse(err),
+        )
         // These are the important errors we really want to track.
         // Given that Rapla returned a successful status code for a set of well-formed
         // query parameters, we can be at least 90% certain that our parsing is broken
         // (or was broken, depending on how you see it).
-        .sentry_capture()
+        .capture()
     })
 }
 
@@ -194,24 +195,20 @@ fn generate_upstream_url(calendar_path: String, query: CalendarQuery) -> (String
 }
 
 async fn send_request(url: &str) -> Result<reqwest::Response, ProxyError> {
-    let into_proxy_error = |err: reqwest::Error| ProxyError {
-        status_code: StatusCode::BAD_GATEWAY,
-        upstream: Some(UpstreamInfo {
-            url: url.to_string(),
-            status_code: None,
-        }),
-        message: "couldn't connect to upstream",
-        details: Some(ProxyErrorDetails::Err {
-            details: err.without_url().to_string(),
-        }),
-    };
-
     let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
     let client = Client::builder()
         .user_agent(user_agent)
         .build()
-        .map_err(into_proxy_error)?;
+        .map_err(|err| {
+            ProxyError::new("Couldn't connect to upstream", ProxyErrorKind::Reqwest(err))
+        })?;
 
-    let request = client.get(url).build().map_err(into_proxy_error)?;
-    client.execute(request).await.map_err(into_proxy_error)
+    let request = client.get(url).build().map_err(|err| {
+        ProxyError::new("Couldn't connect to upstream", ProxyErrorKind::Reqwest(err))
+    })?;
+
+    client
+        .execute(request)
+        .await
+        .map_err(|err| ProxyError::new("Request to upstream failed", ProxyErrorKind::Reqwest(err)))
 }
