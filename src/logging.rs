@@ -21,7 +21,7 @@ async fn logging_middleware(
     next: Next,
 ) -> Response {
     let request_id = request_counter.fetch_add(1, Ordering::Relaxed);
-    let request_url = request.uri().to_string();
+    let request_path = request.uri().to_string();
     let user_agent = request
         .headers()
         .get("user-agent")
@@ -36,7 +36,7 @@ async fn logging_middleware(
         "cached": response.headers().get("x-cache-age").is_some(),
         "processing_time": Instant::now().duration_since(start_time).as_secs_f64(),
         "user_agent": user_agent,
-        "url": request_url,
+        "path": request_path,
     });
 
     let Ok(mut buf) = serde_json::to_vec(&json) else {
