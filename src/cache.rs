@@ -129,3 +129,63 @@ async fn cache_middleware(
 
     Response::from_parts(decomposed.parts, Body::from(decomposed.body))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+
+    use axum::routing;
+    use axum::Router;
+    use tokio::net::TcpListener;
+    use tokio::time::{self, Duration};
+
+    use super::{apply_middleware, Config, CACHE_AGE_HEADER};
+
+    async fn setup_listener() -> (TcpListener, String) {
+        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        (listener, base_url)
+    }
+
+    fn setup_basic_router() -> Router {
+        Router::new().route("/:path", routing::get(|| async { "Hello, World!" }))
+    }
+
+    #[tokio::test]
+    async fn test_server_connection() {
+        let (listener, url) = setup_listener().await;
+        tokio::select! {
+            result = axum::serve(listener, setup_basic_router()) => { result.unwrap(); }
+            result = reqwest::get(url) => { result.unwrap(); }
+        };
+    }
+
+    #[tokio::test]
+    async fn test_cache_middleware() {
+        let ttl = Duration::from_secs(3600);
+        let config = Config { ttl, max_size: 100 };
+
+        let router = apply_middleware(setup_basic_router(), config);
+        let (listener, base_url) = setup_listener().await;
+
+        let fuzzer = async {
+            let response = reqwest::get(format!("{base_url}/test")).await.unwrap();
+            assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
+
+            let response = reqwest::get(format!("{base_url}/test")).await.unwrap();
+            assert!(response.headers().get(CACHE_AGE_HEADER).is_some());
+
+            time::pause();
+            time::advance(ttl).await;
+
+            let response = reqwest::get(format!("{base_url}/test")).await.unwrap();
+            assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
+        };
+
+        tokio::select! {
+            result = axum::serve(listener, router) => result.unwrap(),
+            _ = fuzzer => {},
+        };
+    }
+}
