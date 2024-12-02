@@ -132,7 +132,7 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>> {
             "Couldn't parse month in week header: {err}"
         )
     })?;
-    let monday = NaiveDate::from_ymd_opt(start_year, start_month, start_day).ok_or(
+    let monday = NaiveDate::from_ymd_opt(start_year, start_month, start_day).ok_or_else(||
         error!(html = week_header, "week start date '{start_day}.{start_month}.{start_year}' derived from week header appears to be an invalid date"),
     )?;
 
@@ -141,10 +141,10 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>> {
         let mut day_index = 0;
 
         for column in select!(row, "td") {
-            let class = column.value().classes().next().ok_or(error!(
-                html = column.html(),
-                "Expected element to have a class"
-            ))?;
+            let class =
+                column.value().classes().next().ok_or_else(|| {
+                    error!(html = column.html(), "Expected element to have a class")
+                })?;
 
             if class.starts_with("week_separatorcell") {
                 day_index += 1;
@@ -155,7 +155,7 @@ fn parse_week(element: ElementRef, start_year: i32) -> Result<Vec<Event>> {
 
             let date = monday
                 + Duration::try_days(day_index)
-                    .ok_or(error!("Overflowed date value, something is very wrong"))?;
+                    .ok_or_else(|| error!("Overflowed date value, something is very wrong"))?;
 
             events.push(parse_event_details(column, date)?);
         }
@@ -170,23 +170,22 @@ fn parse_event_details(element: ElementRef, date: NaiveDate) -> Result<Event> {
     let details = select!(element, ":is(a, span.link)", last)?.inner_html();
     let mut details_split = details.split("<br>");
 
-    let times_raw = details_split.next().ok_or(error!(
-        html = details,
-        "Couldn't find time range in event details"
-    ))?;
+    let times_raw = details_split
+        .next()
+        .ok_or_else(|| error!(html = details, "Couldn't find time range in event details"))?;
     let mut times_raw_split = times_raw.split("&nbsp;-");
 
     let mut start = NaiveTime::parse_from_str(
         times_raw_split
             .next()
-            .ok_or(error!(html = times_raw, "Missing event start time"))?,
+            .ok_or_else(|| error!(html = times_raw, "Missing event start time"))?,
         "%H:%M",
     )
     .map_err(|err| error!(html = times_raw, "Couldn't parse event start time: {err}"))?;
 
     let end_time_raw = times_raw_split
         .next()
-        .ok_or(error!(html = times_raw, "Missing event end time in"))?;
+        .ok_or_else(|| error!(html = times_raw, "Missing event end time in"))?;
     // Some genuises at DHBW find it a great idea to leave out the end time
     // to signify "full day" which is to be interpreted as "until 18:00".
     // THEY EVEN KEEP THE DASH AFTER THE START TIME AS BAIT :(
