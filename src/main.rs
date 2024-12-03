@@ -7,8 +7,11 @@ mod proxy;
 use std::io;
 use std::net::SocketAddr;
 
-use axum::Router;
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::{middleware, Router};
 use clap::Parser;
+use sentry::{Hub, SentryFutureExt, SessionMode};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::time::Duration;
@@ -40,6 +43,7 @@ struct Args {
 fn main() -> io::Result<()> {
     let sentry = sentry::init(sentry::ClientOptions {
         release: Some(env!("GIT_COMMIT_HASH").into()),
+        session_mode: SessionMode::Request,
         ..Default::default()
     });
 
@@ -59,13 +63,18 @@ fn main() -> io::Result<()> {
 }
 
 async fn main_impl(args: Args) -> io::Result<()> {
-    let router = Router::new().nest(
-        "/rapla",
-        crate::proxy::router(args.cache.then_some(crate::cache::Config {
-            ttl: Duration::from_secs(args.cache_ttl),
-            max_size: args.cache_max_size,
-        })),
-    );
+    let router = Router::new()
+        .nest(
+            "/rapla",
+            crate::proxy::router(args.cache.then_some(crate::cache::Config {
+                ttl: Duration::from_secs(args.cache_ttl),
+                max_size: args.cache_max_size,
+            })),
+        )
+        .route_layer(middleware::from_fn(|request: Request, next: Next| async {
+            let hub = Hub::new_from_top(Hub::current());
+            next.run(request).bind_hub(hub).await
+        }));
 
     let listener = TcpListener::bind(args.address).await?;
     axum::serve(listener, router)
