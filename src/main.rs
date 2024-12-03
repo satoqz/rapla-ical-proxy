@@ -44,6 +44,7 @@ fn main() -> io::Result<()> {
     let sentry = sentry::init(sentry::ClientOptions {
         release: Some(env!("GIT_COMMIT_HASH").into()),
         session_mode: SessionMode::Request,
+        auto_session_tracking: true,
         ..Default::default()
     });
 
