@@ -151,7 +151,6 @@ async fn handle_calendar(
     // Each calendar query + user agent is the equivalent of a user in Sentry.
     // The identifiers are hashed as to ensure that they're not insanely long.
     let sentry_user_id = hash_sentry_user_id(&query, user_agent);
-    println!("{sentry_user_id}");
 
     let (url, start_year) = generate_upstream_url(calendar_path, query);
 
