@@ -17,6 +17,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::calendar::Calendar;
+use crate::helpers;
 use crate::parser::{parse_calendar, ParseError};
 
 #[derive(Debug)]
@@ -155,21 +156,14 @@ async fn handle_calendar(
     let (url, start_year) = generate_upstream_url(calendar_path, query);
 
     breadcrumb("Sending request to Rapla", "http", {
-        let mut map = Map::new();
-        map.insert("method".into(), "GET".into());
-        map.insert("url".into(), url.clone().into());
-        map
+        helpers::map!({ "method": "GET", "url": url })
     });
 
     let response = send_request(&url).await?;
     let status = response.status();
 
     breadcrumb("Got response from Rapla", "http", {
-        let mut map = Map::new();
-        map.insert("method".into(), "GET".into());
-        map.insert("url".into(), url.clone().into());
-        map.insert("status_code".into(), status.as_u16().into());
-        map
+        helpers::map!({ "method": "GET", "url": url, "status_code": status.as_u16() })
     });
 
     if !status.is_success() {

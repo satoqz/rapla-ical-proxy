@@ -11,6 +11,7 @@ use sentry::Breadcrumb;
 use serde_json::Value;
 
 use crate::calendar::{Calendar, Event};
+use crate::helpers;
 
 pub type Result<T> = std::result::Result<T, ParseError>;
 
@@ -37,9 +38,7 @@ fn breadcrumb<S: Into<String>>(message: S, data: Map<String, Value>) {
 macro_rules! error {
     (html = $html:expr, $($arg:tt)*) => {{
         let message = format!($($arg)*);
-        let mut map = Map::new();
-        map.insert("html".into(), $html.to_owned().into());
-        breadcrumb(&message, map);
+        breadcrumb(&message, helpers::map!({ "html": $html }));
         ParseError(message)
     }};
 
