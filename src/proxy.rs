@@ -1,4 +1,4 @@
-use std::error::Error as StdError;
+use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use axum::extract::{Path, Query};
@@ -38,8 +38,8 @@ impl ProxyError {
     }
 }
 
-impl StdError for ProxyError {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+impl Error for ProxyError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         match &self.kind {
             ProxyErrorKind::Reqwest(err) => Some(err),
             ProxyErrorKind::Parse(err) => Some(err),
