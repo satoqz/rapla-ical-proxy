@@ -73,7 +73,7 @@ struct MiddlewareState {
 }
 
 pub fn apply_middleware(router: Router, config: Config) -> Router {
-    let capacity = config.max_size * 1024 * 1024; // Megabytes, weighter measures bytes
+    let capacity = config.max_size * 1024 * 1024; // Megabytes, weighter measures bytes.
     let cache = Cache::with_weighter(100, capacity, CachedResponseWeighter);
 
     router.route_layer(middleware::from_fn_with_state(
