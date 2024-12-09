@@ -21,7 +21,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_urlencoded = "0.7"
 sha2 = "0.10.8"
-tokio = { version = "1.36", features = ["rt-multi-thread", "signal", "test-util"] }
+tokio = { version = "1.42", features = ["rt-multi-thread", "signal", "test-util"] }
 
 [profile.release]
 opt-level = 3
