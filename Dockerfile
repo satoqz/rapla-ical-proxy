@@ -19,8 +19,11 @@ EXPOSE 8080
 ENTRYPOINT [ "rapla-ical-proxy" ]
 CMD [ "--address=0.0.0.0:8080", "--cache" ]
 
+# Used for CI builds that cross-compile outside of the container build.
+# Assumes a directory layout of bin/rapla-ical-proxy-{arm64,amd64,...}.
+ARG TARGETARCH
 FROM runtime AS external-build
-COPY rapla-ical-proxy /usr/local/bin/rapla-ical-proxy
+COPY rapla-ical-proxy-${TARGETARCH} /usr/local/bin/rapla-ical-proxy
 
 FROM runtime AS docker-build
 COPY --from=builder /build/target/release/rapla-ical-proxy /usr/local/bin/rapla-ical-proxy
