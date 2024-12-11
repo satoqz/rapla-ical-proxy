@@ -30,7 +30,7 @@ Congratulations, you no longer need the HTML-based rapla calendar. The calendar 
 
 ## Self-hosting
 
-You can easily deploy the proxy yourself using the container image built by GitHub Actions (Only `linux/amd64` is supported for now)
+You can easily deploy the proxy yourself using the container image built by GitHub Actions (Both `linux/amd64` and `linux/arm64` are supported)
 
 ```sh
 docker run -p 8080:8080 ghcr.io/satoqz/rapla-ical-proxy

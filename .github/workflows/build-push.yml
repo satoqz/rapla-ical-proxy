@@ -7,21 +7,59 @@ on:
     branches: [main]
 
 env:
-  CARGO_TERM_COLOR: always
+  BIN: rapla-ical-proxy
 
 jobs:
-  build-push:
+  build:
+    strategy:
+      matrix:
+        arch: [aarch64, x86_64]
+
+    runs-on: ubuntu-latest
+
+    env:
+      RUST_TARGET: ${{ matrix.arch }}-unknown-linux-musl
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@a67e68dc5c8281d9608136d3d7ca1b282213e4ac # v1.2.1
+
+      - name: Set up Rust cache
+        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
+
+      - name: Prepare Rust toolchain for ${{ env.RUST_TARGET }}
+        run: |
+          rustup target add ${{ env.RUST_TARGET }}
+          gh release download --repo rust-cross/cargo-zigbuild -p '*.x86_64-unknown-linux-musl.tar.gz' -O - | tar xzf - -C /usr/local/bin
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build for ${{ env.RUST_TARGET }}
+        run: cargo zigbuild --locked --release --target ${{ env.RUST_TARGET }}
+
+      - name: Rename binary
+        run: cp target/${{ env.RUST_TARGET }}/release/${{ env.BIN }} ${{ env.BIN }}.${{ env.RUST_TARGET }}
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: ${{ env.BIN }}.${{ env.RUST_TARGET }}
+          path: ${{ env.BIN }}.${{ env.RUST_TARGET }}
+
+  push:
+    needs: build
+    runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
       id-token: write
 
-    runs-on: ubuntu-latest
-
     env:
-      RUST_TARGET: x86_64-unknown-linux-musl
-      LINKER: x86_64-linux-gnu-gcc
-
       REGISTRY: ghcr.io
       IMAGE_NAME: ${{ github.repository }}
 
@@ -29,16 +67,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
+      - name: Download artefact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.8.1
+        with:
+          path: bin
+          pattern: ${{ env.BIN }}.*
+          merge-multiple: true
 
-      - name: Add Musl target
-        run: rustup target add ${{ env.RUST_TARGET }}
-
-      - name: Build binary
+      - name: Rename binaries
+        working-directory: bin
         run: |
-          cargo build --locked --release --target ${{ env.RUST_TARGET }} \
-            --config target.${{ env.RUST_TARGET }}.linker=\"${{ env.LINKER }}\"
+          mv ${{ env.BIN }}.aarch64* ${{ env.BIN }}-arm64
+          mv ${{ env.BIN }}.x86_64* ${{ env.BIN }}-amd64
 
       - name: Extract container image metadata
         uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
@@ -68,8 +108,8 @@ jobs:
         with:
           file: Dockerfile
           target: external-build
-          context: target/${{ env.RUST_TARGET }}/release
-          platforms: linux/amd64
+          context: bin
+          platforms: linux/arm64,linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
