@@ -45,7 +45,7 @@ macro_rules! error {
     ($($arg:tt)*) => {{
         let message = format!($($arg)*);
         breadcrumb(&message, Map::new());
-        ParseError(format!($($arg)*))
+        ParseError(message)
     }};
 }
 
@@ -57,9 +57,7 @@ macro_rules! select {
 
     ($element:expr, $query:expr, $method:ident) => {
         select!($element, $query).$method().ok_or_else(|| {
-            let mut map = Map::new();
-            map.insert("selector".into(), $query.into());
-            breadcrumb("Used query selector", map);
+            breadcrumb("Used query selector", helpers::map!({ "selector": $query }));
             error!("Query selector didn't yield any elements")
         })
     };
