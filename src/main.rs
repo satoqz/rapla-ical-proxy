@@ -7,6 +7,7 @@ mod proxy;
 
 use std::io;
 use std::net::SocketAddr;
+use std::num::NonZeroU64;
 
 use axum::extract::Request;
 use axum::middleware::Next;
@@ -37,8 +38,8 @@ struct Args {
     cache_ttl: u64,
 
     /// Maximum cache size in Megabytes.
-    #[arg(short = 's', long, env("RAPLA_CACHE_MAX_SIZE"), default_value_t = 50)]
-    cache_max_size: u64,
+    #[arg(short = 's', long, env("RAPLA_CACHE_MAX_SIZE"), default_value_t = NonZeroU64::new(50).unwrap())]
+    cache_max_size: NonZeroU64,
 }
 
 fn main() -> io::Result<()> {
@@ -70,7 +71,7 @@ async fn main_impl(args: Args) -> io::Result<()> {
             "/rapla",
             crate::proxy::router(args.cache.then_some(crate::cache::Config {
                 ttl: Duration::from_secs(args.cache_ttl),
-                max_size: args.cache_max_size,
+                max_size: args.cache_max_size.into(),
             })),
         )
         .route_layer(middleware::from_fn(|request: Request, next: Next| async {
