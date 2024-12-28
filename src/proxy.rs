@@ -7,14 +7,12 @@ use axum::routing::get;
 use axum::Router;
 use axum_extra::headers::UserAgent;
 use axum_extra::TypedHeader;
-use base64ct::{Base64, Encoding};
 use chrono::{Datelike, Duration, Utc};
 use reqwest::{Client, Error as ReqwestError, StatusCode};
 use sentry::protocol::Map;
-use sentry::{Breadcrumb, User};
+use sentry::Breadcrumb;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use crate::calendar::Calendar;
 use crate::helpers;
@@ -118,23 +116,6 @@ fn breadcrumb(message: &str, ty: &str, data: Map<String, Value>) {
     });
 }
 
-fn hash_sentry_user_id(query: &CalendarQuery, user_agent: UserAgent) -> String {
-    let mut hasher = Sha256::new();
-    match &query {
-        CalendarQuery::V1 { key, salt } => {
-            hasher.update(key);
-            hasher.update(salt);
-        }
-        &CalendarQuery::V2 { user, file } => {
-            hasher.update(user);
-            hasher.update(file);
-        }
-    }
-    hasher.update(user_agent.as_str());
-    let hash = hasher.finalize();
-    Base64::encode_string(&hash)
-}
-
 async fn handle_calendar(
     Path(calendar_path): Path<String>,
     Query(query): Query<CalendarQuery>,
@@ -149,19 +130,13 @@ async fn handle_calendar(
         map
     });
 
-    // Each calendar query + user agent is the equivalent of a user in Sentry.
-    // The identifiers are hashed as to ensure that they're not insanely long.
-    let sentry_user_id = hash_sentry_user_id(&query, user_agent);
-
     let (url, start_year) = generate_upstream_url(calendar_path, query);
-
     breadcrumb("Sending request to Rapla", "http", {
         helpers::map!({ "method": "GET", "url": url })
     });
 
     let response = send_request(&url).await?;
     let status = response.status();
-
     breadcrumb("Got response from Rapla", "http", {
         helpers::map!({ "method": "GET", "url": url, "status_code": status.as_u16() })
     });
@@ -172,15 +147,6 @@ async fn handle_calendar(
             ProxyErrorKind::Status(status),
         ));
     }
-
-    // Once we have a good status code from upstream, we can assume that our "user" is real,
-    // i.e. not just some nonsense parameters.
-    sentry::configure_scope(|scope| {
-        scope.set_user(Some(User {
-            id: Some(sentry_user_id),
-            ..Default::default()
-        }))
-    });
 
     let html = response.text().await.map_err(|err| {
         ProxyError::new(
