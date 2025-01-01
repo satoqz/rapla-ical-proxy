@@ -10,8 +10,8 @@ use std::net::SocketAddr;
 use std::num::NonZeroU64;
 
 use axum::extract::Request;
+use axum::middleware;
 use axum::middleware::Next;
-use axum::{middleware, Router};
 use clap::Parser;
 use sentry::{Hub, SentryFutureExt, SessionMode};
 use tokio::net::TcpListener;
