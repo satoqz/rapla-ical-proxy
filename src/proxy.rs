@@ -88,7 +88,7 @@ impl IntoResponse for Calendar {
 }
 
 pub fn router(cache_config: Option<crate::cache::Config>) -> Router {
-    let router = Router::new().route("/:calendar_path", get(handle_calendar));
+    let router = Router::new().route("/rapla/:calendar_path", get(handle_calendar));
 
     let router = if let Some(cache_config) = cache_config {
         crate::cache::apply_middleware(router, cache_config)

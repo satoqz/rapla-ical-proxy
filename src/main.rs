@@ -66,18 +66,14 @@ fn main() -> io::Result<()> {
 }
 
 async fn main_impl(args: Args) -> io::Result<()> {
-    let router = Router::new()
-        .nest(
-            "/rapla",
-            crate::proxy::router(args.cache.then_some(crate::cache::Config {
-                ttl: Duration::from_secs(args.cache_ttl),
-                max_size: args.cache_max_size.into(),
-            })),
-        )
-        .route_layer(middleware::from_fn(|request: Request, next: Next| async {
-            let hub = Hub::new_from_top(Hub::current());
-            next.run(request).bind_hub(hub).await
-        }));
+    let router = crate::proxy::router(args.cache.then_some(crate::cache::Config {
+        ttl: Duration::from_secs(args.cache_ttl),
+        max_size: args.cache_max_size.into(),
+    }))
+    .route_layer(middleware::from_fn(|request: Request, next: Next| async {
+        let hub = Hub::new_from_top(Hub::current());
+        next.run(request).bind_hub(hub).await
+    }));
 
     let listener = TcpListener::bind(args.address).await?;
     axum::serve(listener, router)
