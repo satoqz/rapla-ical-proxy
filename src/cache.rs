@@ -69,7 +69,7 @@ pub struct Config {
 #[derive(Debug)]
 struct MiddlewareState {
     cache: Cache<String, CachedResponse, CachedResponseWeighter>,
-    ttl: Duration,
+    config: Config,
 }
 
 pub fn apply_middleware(router: Router, config: Config) -> Router {
@@ -77,10 +77,7 @@ pub fn apply_middleware(router: Router, config: Config) -> Router {
     let cache = Cache::with_weighter(100, capacity, CachedResponseWeighter);
 
     router.route_layer(middleware::from_fn_with_state(
-        Arc::new(MiddlewareState {
-            cache,
-            ttl: config.ttl,
-        }),
+        Arc::new(MiddlewareState { cache, config }),
         cache_middleware,
     ))
 }
@@ -99,7 +96,9 @@ async fn cache_middleware(
     };
 
     let response = next.run(request).await;
-    let decomposed = decompose_response(response).await;
+    if state.config.max_size == 0 {
+        return response;
+    }
 
     // We're fine caching responses no matter the status. If things recover to normal automatically, just wait out the TTL.
     // If a fix needs to be pushed from our side, we're redeploying and thereby clearing the cache anyways.
@@ -110,6 +109,7 @@ async fn cache_middleware(
     // This is the only place that we ever insert (locked by key). Additionally, the whole reason we're here
     // is that remove was called, and that we're about to schedule a new remove call.
     // TLDR; the unwrap should be fine.
+    let decomposed = decompose_response(response).await;
     placeholder.insert(decomposed.clone()).unwrap();
 
     // Remove key from the cache once the TTL is expired.
@@ -117,12 +117,12 @@ async fn cache_middleware(
     // the cache and we notice that it has expired, but that encomplicates using
     // quick_cache's get_value_or_guard functionality and has other tradeoffs.
     task::spawn(async move {
-        time::sleep(state.ttl).await;
+        time::sleep(state.config.ttl).await;
         let now = Instant::now();
         // Ensure that we're removing only what was inserted above.
         // The cache could have evicted the entry itself because it got too large,
         // and a newer entry might already be in place. We don't want to remove that.
-        if decomposed.timestamp + state.ttl <= now {
+        if decomposed.timestamp + state.config.ttl <= now {
             state.cache.remove(&key);
         }
     });
