@@ -7,7 +7,6 @@ mod proxy;
 
 use std::io;
 use std::net::SocketAddr;
-use std::num::NonZeroU64;
 
 use axum::extract::Request;
 use axum::middleware;
@@ -29,17 +28,13 @@ struct Args {
     )]
     address: SocketAddr,
 
-    /// Enable caching of parsed calendars.
-    #[arg(short = 'c', long, env("RAPLA_CACHE"))]
-    cache: bool,
-
     /// Time-to-live for cached responses (in seconds).
     #[arg(short = 't', long, env("RAPLA_CACHE_TTL"), default_value_t = 3600)]
     cache_ttl: u64,
 
-    /// Maximum cache size in Megabytes.
-    #[arg(short = 's', long, env("RAPLA_CACHE_MAX_SIZE"), default_value_t = NonZeroU64::new(50).unwrap())]
-    cache_max_size: NonZeroU64,
+    /// Maximum cache size in Megabytes. A value of 0 results in no caching.
+    #[arg(short = 's', long, env("RAPLA_CACHE_MAX_SIZE"), default_value_t = 0)]
+    cache_max_size: u64,
 }
 
 fn main() -> io::Result<()> {
@@ -53,7 +48,6 @@ fn main() -> io::Result<()> {
     let args = Args::parse();
 
     eprintln!("Listening on address:    {}", args.address);
-    eprintln!("Caching enabled:         {}", args.cache);
     eprintln!("Cache time to live:      {}s", args.cache_ttl);
     eprintln!("Cache max size:          {}mb", args.cache_max_size);
     eprintln!("Sentry enabled:          {}", sentry.is_enabled());
@@ -66,10 +60,10 @@ fn main() -> io::Result<()> {
 }
 
 async fn main_impl(args: Args) -> io::Result<()> {
-    let router = crate::proxy::router(args.cache.then_some(crate::cache::Config {
+    let router = crate::proxy::router(crate::cache::Config {
         ttl: Duration::from_secs(args.cache_ttl),
         max_size: args.cache_max_size.into(),
-    }))
+    })
     .route_layer(middleware::from_fn(|request: Request, next: Next| async {
         let hub = Hub::new_from_top(Hub::current());
         next.run(request).bind_hub(hub).await
