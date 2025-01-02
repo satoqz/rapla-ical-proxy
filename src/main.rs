@@ -9,8 +9,8 @@ use std::io;
 use std::net::SocketAddr;
 
 use axum::extract::Request;
-use axum::middleware;
 use axum::middleware::Next;
+use axum::{middleware, Router};
 use clap::Parser;
 use sentry::{Hub, SentryFutureExt, SessionMode};
 use tokio::net::TcpListener;
@@ -60,14 +60,22 @@ fn main() -> io::Result<()> {
 }
 
 async fn main_impl(args: Args) -> io::Result<()> {
-    let router = crate::proxy::router(crate::cache::Config {
+    let cache_config = crate::cache::Config {
         ttl: Duration::from_secs(args.cache_ttl),
         max_size: args.cache_max_size,
-    })
-    .route_layer(middleware::from_fn(|request: Request, next: Next| async {
+    };
+
+    let sentry_hub_middleware = middleware::from_fn(|request: Request, next: Next| async {
         let hub = Hub::new_from_top(Hub::current());
         next.run(request).bind_hub(hub).await
-    }));
+    });
+
+    // Middlewares are layered, i.e. the later it is applied the earlier it is called.
+    let router = Router::new();
+    let router = crate::proxy::apply_routes(router);
+    let router = crate::cache::apply_middleware(router, cache_config);
+    let router = crate::logging::apply_middleware(router);
+    let router = router.route_layer(sentry_hub_middleware);
 
     let listener = TcpListener::bind(args.address).await?;
     axum::serve(listener, router)
