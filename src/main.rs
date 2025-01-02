@@ -4,6 +4,7 @@ mod helpers;
 mod logging;
 mod parser;
 mod proxy;
+mod resolver;
 
 use std::io;
 use std::net::SocketAddr;
@@ -72,8 +73,10 @@ async fn main_impl(args: Args) -> io::Result<()> {
 
     // Middlewares are layered, i.e. the later it is applied the earlier it is called.
     let router = Router::new();
-    let router = crate::proxy::apply_routes(router);
+    let router = crate::proxy::apply_routes(router)
+        .route("/*path", axum::routing::get(|| async { "Hello, World!" }));
     let router = crate::cache::apply_middleware(router, cache_config);
+    let router = crate::resolver::apply_middleware(router);
     let router = crate::logging::apply_middleware(router);
     let router = router.route_layer(sentry_hub_middleware);
 
