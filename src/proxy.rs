@@ -90,7 +90,6 @@ pub fn apply_routes(router: Router) -> Router {
 async fn handle_calendar(
     Extension(upstream): Extension<UpstreamUrlExtension>,
 ) -> impl IntoResponse {
-    dbg!(&upstream.url);
     breadcrumb("Sending request to Rapla", "http", {
         helpers::map!({ "method": "GET", "url": upstream.url })
     });
