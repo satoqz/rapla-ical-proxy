@@ -62,7 +62,7 @@ fn main() -> io::Result<()> {
 async fn main_impl(args: Args) -> io::Result<()> {
     let router = crate::proxy::router(crate::cache::Config {
         ttl: Duration::from_secs(args.cache_ttl),
-        max_size: args.cache_max_size.into(),
+        max_size: args.cache_max_size,
     })
     .route_layer(middleware::from_fn(|request: Request, next: Next| async {
         let hub = Hub::new_from_top(Hub::current());
