@@ -73,8 +73,7 @@ async fn main_impl(args: Args) -> io::Result<()> {
 
     // Middlewares are layered, i.e. the later it is applied the earlier it is called.
     let router = Router::new();
-    let router = crate::proxy::apply_routes(router)
-        .route("/*path", axum::routing::get(|| async { "Hello, World!" }));
+    let router = crate::proxy::apply_routes(router);
     let router = crate::cache::apply_middleware(router, cache_config);
     let router = crate::resolver::apply_middleware(router);
     let router = crate::logging::apply_middleware(router);

@@ -4,14 +4,15 @@ use std::sync::Arc;
 use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::response::Parts;
-use axum::http::Uri;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::Router;
+use axum::{Extension, Router};
 use quick_cache::sync::Cache;
 use quick_cache::Weighter;
 use tokio::task;
 use tokio::time::{self, Duration, Instant};
+
+use crate::resolver::UpstreamUrlExtension;
 
 const CACHE_AGE_HEADER: &str = "x-cache-age";
 
@@ -84,13 +85,11 @@ pub fn apply_middleware(router: Router, config: Config) -> Router {
 
 async fn cache_middleware(
     State(state): State<Arc<MiddlewareState>>,
-    uri: Uri,
+    Extension(upstream): Extension<UpstreamUrlExtension>,
     request: Request,
     next: Next,
 ) -> Response {
-    let key = uri.to_string();
-
-    let placeholder = match state.cache.get_value_or_guard_async(&key).await {
+    let placeholder = match state.cache.get_value_or_guard_async(&upstream.url).await {
         Ok(cached) => return cached.into_response(),
         Err(placeholder) => placeholder,
     };
@@ -123,7 +122,7 @@ async fn cache_middleware(
         // The cache could have evicted the entry itself because it got too large,
         // and a newer entry might already be in place. We don't want to remove that.
         if decomposed.timestamp + state.config.ttl <= now {
-            state.cache.remove(&key);
+            state.cache.remove(&upstream.url);
         }
     });
 

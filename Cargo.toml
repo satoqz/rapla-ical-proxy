@@ -6,7 +6,6 @@ repository = "https://github.com/satoqz/rapla-ical-proxy"
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "http2", "query"] }
-axum-extra = { version = "0.10", default-features = false, features = ["typed-header"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "now"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 html-escape = "0.2"
