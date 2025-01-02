@@ -32,13 +32,15 @@ struct UpstreamUrlComponents {
 impl UpstreamUrlComponents {
     fn try_from_request(request: &Request) -> Option<Self> {
         // Try either:
-        //  1. The request URL itself (e.g. https://rapla.satoqz.net/rapla/calendar).
-        //  2. The request path, treating it as a URL (e.g. https://rapla.satoqz.net/https://rapla.dhbw.de/rapla/calendar).
-        Self::try_from_uri(request.uri()).or_else(|| {
+        //  1. The request path, treating it as a URL (e.g. https://rapla.satoqz.net/https://rapla.dhbw.de/rapla/calendar).
+        //  2. The request URL itself (e.g. https://rapla.satoqz.net/rapla/calendar).
+        // Order matters!!!
+        None.or_else(|| {
             let path_and_query = request.uri().path_and_query()?;
             let uri = Uri::from_str(path_and_query.as_str().trim_start_matches('/')).ok()?;
             Self::try_from_uri(&uri)
         })
+        .or_else(|| Self::try_from_uri(request.uri()))
     }
 
     const DEFAULT_HOST: &'static str = "rapla.dhbw.de";
@@ -71,7 +73,7 @@ impl UpstreamUrlComponents {
         })
     }
 
-    fn generate_url(self) -> String {
+    fn generate_url(self) -> UpstreamUrlExtension {
         // These don't need to be 100% accurate.
         const WEEKS_TWO_YEARS: usize = 104;
         const DAYS_ONE_YEAR: i64 = 365;
@@ -79,7 +81,7 @@ impl UpstreamUrlComponents {
         let now = Utc::now();
         let year_ago = now - Duration::try_days(DAYS_ONE_YEAR).unwrap();
 
-        format!(
+        let url = format!(
             "https://{}/rapla/{}?day={}&month={}&year={}&pages={WEEKS_TWO_YEARS}&{}",
             self.host,
             self.page,
@@ -88,12 +90,20 @@ impl UpstreamUrlComponents {
             year_ago.year(),
             // There's no reason this should fail, we already parsed it in the first place.
             serde_urlencoded::to_string(self.query).unwrap()
-        )
+        );
+
+        UpstreamUrlExtension {
+            url,
+            start_year: year_ago.year(),
+        }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct UpstreamUrlExtension(pub String);
+pub struct UpstreamUrlExtension {
+    pub url: String,
+    pub start_year: i32,
+}
 
 pub fn apply_middleware(router: Router) -> Router {
     router.route_layer(middleware::from_fn(resolver_middleware))
@@ -101,10 +111,11 @@ pub fn apply_middleware(router: Router) -> Router {
 
 async fn resolver_middleware(mut request: Request, next: Next) -> Response {
     match UpstreamUrlComponents::try_from_request(&request) {
-        Some(components) => request
-            .extensions_mut()
-            .insert(UpstreamUrlExtension(components.generate_url())),
-        None => return "oh no".into_response(),
+        Some(components) => request.extensions_mut().insert(components.generate_url()),
+        None => {
+            return "Error: Could not determine upstream URL, check your request URL"
+                .into_response()
+        }
     };
 
     next.run(request).await
