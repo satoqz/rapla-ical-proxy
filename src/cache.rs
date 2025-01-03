@@ -138,7 +138,7 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::time::{self, Duration};
 
-    use super::{apply_middleware, Config, CACHE_AGE_HEADER};
+    use super::{Config, CACHE_AGE_HEADER};
 
     async fn setup_listener() -> (TcpListener, String) {
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));
@@ -148,7 +148,10 @@ mod tests {
     }
 
     fn setup_basic_router() -> Router {
-        Router::new().route("/{path}", routing::get(|| async { "Hello, World!" }))
+        Router::new().route(
+            "/rapla/calendar",
+            routing::get(|| async { "Hello, World!" }),
+        )
     }
 
     #[tokio::test]
@@ -165,26 +168,39 @@ mod tests {
         let ttl = Duration::from_secs(3600);
         let config = Config { ttl, max_size: 100 };
 
-        let router = apply_middleware(setup_basic_router(), config);
+        let router = setup_basic_router();
+        let router = super::apply_middleware(router, config);
+        let router = crate::resolver::apply_middleware(router);
         let (listener, base_url) = setup_listener().await;
 
-        let fuzzer = async {
-            let response = reqwest::get(format!("{base_url}/test")).await.unwrap();
+        let tests = async {
+            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=abc&salt=def"))
+                .await
+                .unwrap();
             assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
 
-            let response = reqwest::get(format!("{base_url}/test")).await.unwrap();
+            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=abc&salt=def"))
+                .await
+                .unwrap();
             assert!(response.headers().get(CACHE_AGE_HEADER).is_some());
+
+            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=uvw&salt=xyz"))
+                .await
+                .unwrap();
+            assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
 
             time::pause();
             time::advance(ttl).await;
 
-            let response = reqwest::get(format!("{base_url}/test")).await.unwrap();
+            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=abc&salt=def"))
+                .await
+                .unwrap();
             assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
         };
 
         tokio::select! {
             result = axum::serve(listener, router) => result.unwrap(),
-            _ = fuzzer => {},
+            _ = tests => {},
         };
     }
 }
