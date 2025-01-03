@@ -29,42 +29,57 @@ struct UpstreamUrlComponents {
     query: RaplaBaseQuery,
 }
 
+#[derive(Debug, Clone)]
+pub struct UpstreamUrlExtension {
+    pub url: String,
+    pub start_year: i32,
+}
+
+pub fn apply_middleware(router: Router) -> Router {
+    router.route_layer(middleware::from_fn(resolver_middleware))
+}
+
+async fn resolver_middleware(mut request: Request, next: Next) -> Response {
+    let Some(components) = UpstreamUrlComponents::from_request_uri(request.uri()) else {
+        return "Error: Could not determine upstream URL, check your request URL".into_response();
+    };
+
+    request.extensions_mut().insert(components.generate_url());
+    next.run(request).await
+}
+
 impl UpstreamUrlComponents {
-    fn try_from_request(request: &Request) -> Option<Self> {
+    const DEFAULT_HOST: &'static str = "rapla.dhbw.de";
+    const HOST_ALLOWLIST: [&'static str; 2] = ["rapla.dhbw.de", "rapla-ravensburg.dhbw.de"];
+
+    fn from_request_uri(uri: &Uri) -> Option<Self> {
         // Try either:
         //  1. The request path, treating it as a URL (e.g. https://rapla.satoqz.net/https://rapla.dhbw.de/rapla/calendar).
         //  2. The request URL itself (e.g. https://rapla.satoqz.net/rapla/calendar).
         // Order matters!!!
-        None.or_else(|| {
-            let path_and_query = request.uri().path_and_query()?;
-            let uri = Uri::from_str(path_and_query.as_str().trim_start_matches('/')).ok()?;
-            Self::try_from_uri(&uri)
-        })
-        .or_else(|| Self::try_from_uri(request.uri()))
+        let uri_in_path = uri
+            .path_and_query()
+            .map(|path| path.as_str().trim_start_matches('/'))
+            .and_then(|path| Uri::from_str(path).ok());
+
+        uri_in_path
+            .as_ref()
+            .and_then(Self::from_simple_uri)
+            .or_else(|| Self::from_simple_uri(uri))
     }
 
-    const DEFAULT_HOST: &'static str = "rapla.dhbw.de";
-    const HOST_ALLOWLIST: [&'static str; 2] = ["rapla.dhbw.de", "rapla-ravensburg.dhbw.de"];
-
-    fn try_from_uri(uri: &Uri) -> Option<Self> {
-        let host = match uri.host() {
-            Some(host) if Self::HOST_ALLOWLIST.contains(&host) => host,
-            Some(_) => return None,
-            None => Self::DEFAULT_HOST,
-        };
+    fn from_simple_uri(uri: &Uri) -> Option<Self> {
+        let host = uri.host().unwrap_or(Self::DEFAULT_HOST);
+        if !Self::HOST_ALLOWLIST.contains(&host) {
+            return None;
+        }
 
         let query: RaplaQueryWithPage = serde_urlencoded::from_str(uri.query()?).ok()?;
-        let page = match query.page {
-            Some(page) => page,
-            None => {
-                let path = uri.path();
-                if path.starts_with("/rapla/") {
-                    path.trim_start_matches("/rapla/").to_string()
-                } else {
-                    return None;
-                }
-            }
-        };
+        let page = query.page.or_else(|| {
+            let path = uri.path();
+            path.starts_with("/rapla/")
+                .then(|| path.trim_start_matches("/rapla/").to_string())
+        })?;
 
         Some(UpstreamUrlComponents {
             host: host.to_string(),
@@ -97,26 +112,4 @@ impl UpstreamUrlComponents {
             start_year: year_ago.year(),
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct UpstreamUrlExtension {
-    pub url: String,
-    pub start_year: i32,
-}
-
-pub fn apply_middleware(router: Router) -> Router {
-    router.route_layer(middleware::from_fn(resolver_middleware))
-}
-
-async fn resolver_middleware(mut request: Request, next: Next) -> Response {
-    match UpstreamUrlComponents::try_from_request(&request) {
-        Some(components) => request.extensions_mut().insert(components.generate_url()),
-        None => {
-            return "Error: Could not determine upstream URL, check your request URL"
-                .into_response()
-        }
-    };
-
-    next.run(request).await
 }
