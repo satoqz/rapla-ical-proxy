@@ -149,7 +149,7 @@ mod tests {
     }
 
     fn setup_basic_router() -> Router {
-        Router::new().route("/:path", routing::get(|| async { "Hello, World!" }))
+        Router::new().route("/{path}", routing::get(|| async { "Hello, World!" }))
     }
 
     #[tokio::test]
