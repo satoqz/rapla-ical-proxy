@@ -88,7 +88,7 @@ impl IntoResponse for Calendar {
 }
 
 pub fn apply_routes(router: Router) -> Router {
-    router.route("/rapla/:calendar_path", get(handle_calendar))
+    router.route("/rapla/{calendar_path}", get(handle_calendar))
 }
 
 #[derive(Serialize, Deserialize)]
