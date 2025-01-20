@@ -1,22 +1,18 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
-use axum_extra::headers::UserAgent;
-use axum_extra::TypedHeader;
-use chrono::{Datelike, Duration, Utc};
+use axum::{Extension, Router};
 use reqwest::{Client, Error as ReqwestError, StatusCode};
 use sentry::protocol::Map;
 use sentry::Breadcrumb;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::calendar::Calendar;
 use crate::helpers;
 use crate::parser::{parse_calendar, ParseError};
+use crate::resolver::UpstreamUrlExtension;
 
 #[derive(Debug)]
 struct ProxyError {
@@ -88,49 +84,21 @@ impl IntoResponse for Calendar {
 }
 
 pub fn apply_routes(router: Router) -> Router {
-    router.route("/rapla/{calendar_path}", get(handle_calendar))
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-enum CalendarQuery {
-    V1 { key: String, salt: String },
-    V2 { user: String, file: String },
-}
-
-fn breadcrumb(message: &str, ty: &str, data: Map<String, Value>) {
-    sentry::add_breadcrumb(Breadcrumb {
-        ty: ty.into(),
-        category: Some("proxy".into()),
-        message: Some(message.into()),
-        data,
-        ..Default::default()
-    });
+    router.route("/{*path}", get(handle_calendar))
 }
 
 async fn handle_calendar(
-    Path(calendar_path): Path<String>,
-    Query(query): Query<CalendarQuery>,
-    TypedHeader(user_agent): TypedHeader<UserAgent>,
+    Extension(upstream): Extension<UpstreamUrlExtension>,
 ) -> impl IntoResponse {
-    breadcrumb("Incoming request", "default", {
-        let mut map = Map::from_iter(match serde_json::to_value(&query).unwrap() {
-            Value::Object(obj) => obj.into_iter(),
-            _ => unreachable!(),
-        });
-        map.insert("user_agent".into(), user_agent.as_str().into());
-        map
-    });
-
-    let (url, start_year) = generate_upstream_url(calendar_path, query);
     breadcrumb("Sending request to Rapla", "http", {
-        helpers::map!({ "method": "GET", "url": url })
+        helpers::map!({ "method": "GET", "url": upstream.url })
     });
 
-    let response = send_request(&url).await?;
+    let response = send_request(&upstream.url).await?;
     let status = response.status();
+
     breadcrumb("Got response from Rapla", "http", {
-        helpers::map!({ "method": "GET", "url": url, "status_code": status.as_u16() })
+        helpers::map!({ "method": "GET", "url": upstream.url, "status_code": status.as_u16() })
     });
 
     if !status.is_success() {
@@ -149,7 +117,7 @@ async fn handle_calendar(
         .capture()
     })?;
 
-    parse_calendar(&html, start_year).map_err(|err| {
+    parse_calendar(&html, upstream.start_year).map_err(|err| {
         ProxyError::new(
             "Couldn't parse HTML returned by upstream",
             ProxyErrorKind::Parse(err),
@@ -162,25 +130,14 @@ async fn handle_calendar(
     })
 }
 
-fn generate_upstream_url(calendar_path: String, query: CalendarQuery) -> (String, i32) {
-    // These don't need to be 100% accurate.
-    const WEEKS_TWO_YEARS: usize = 104;
-    const DAYS_ONE_YEAR: i64 = 365;
-
-    let now = Utc::now();
-    let year_ago = now - Duration::try_days(DAYS_ONE_YEAR).unwrap();
-
-    const UPSTREAM: &str = "https://rapla.dhbw.de";
-    let url = format!(
-        "{UPSTREAM}/rapla/{calendar_path}?day={}&month={}&year={}&pages={WEEKS_TWO_YEARS}&{}",
-        year_ago.day(),
-        year_ago.month(),
-        year_ago.year(),
-        // There's no reason this should fail, we already parsed it in the first place.
-        serde_urlencoded::to_string(query).unwrap(),
-    );
-
-    (url, year_ago.year())
+fn breadcrumb(message: &str, ty: &str, data: Map<String, Value>) {
+    sentry::add_breadcrumb(Breadcrumb {
+        ty: ty.into(),
+        category: Some("proxy".into()),
+        message: Some(message.into()),
+        data,
+        ..Default::default()
+    });
 }
 
 async fn send_request(url: &str) -> Result<reqwest::Response, ProxyError> {

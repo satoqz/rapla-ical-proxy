@@ -4,14 +4,15 @@ use std::sync::Arc;
 use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::response::Parts;
-use axum::http::Uri;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::Router;
+use axum::{Extension, Router};
 use quick_cache::sync::Cache;
 use quick_cache::Weighter;
 use tokio::task;
 use tokio::time::{self, Duration, Instant};
+
+use crate::resolver::UpstreamUrlExtension;
 
 const CACHE_AGE_HEADER: &str = "x-cache-age";
 
@@ -84,13 +85,11 @@ pub fn apply_middleware(router: Router, config: Config) -> Router {
 
 async fn cache_middleware(
     State(state): State<Arc<MiddlewareState>>,
-    uri: Uri,
+    Extension(upstream): Extension<UpstreamUrlExtension>,
     request: Request,
     next: Next,
 ) -> Response {
-    let key = uri.to_string();
-
-    let placeholder = match state.cache.get_value_or_guard_async(&key).await {
+    let placeholder = match state.cache.get_value_or_guard_async(&upstream.url).await {
         Ok(cached) => return cached.into_response(),
         Err(placeholder) => placeholder,
     };
@@ -123,7 +122,7 @@ async fn cache_middleware(
         // The cache could have evicted the entry itself because it got too large,
         // and a newer entry might already be in place. We don't want to remove that.
         if decomposed.timestamp + state.config.ttl <= now {
-            state.cache.remove(&key);
+            state.cache.remove(&upstream.url);
         }
     });
 
@@ -139,7 +138,7 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::time::{self, Duration};
 
-    use super::{apply_middleware, Config, CACHE_AGE_HEADER};
+    use super::{Config, CACHE_AGE_HEADER};
 
     async fn setup_listener() -> (TcpListener, String) {
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));
@@ -149,7 +148,10 @@ mod tests {
     }
 
     fn setup_basic_router() -> Router {
-        Router::new().route("/{path}", routing::get(|| async { "Hello, World!" }))
+        Router::new().route(
+            "/rapla/calendar",
+            routing::get(|| async { "Hello, World!" }),
+        )
     }
 
     #[tokio::test]
@@ -166,26 +168,39 @@ mod tests {
         let ttl = Duration::from_secs(3600);
         let config = Config { ttl, max_size: 100 };
 
-        let router = apply_middleware(setup_basic_router(), config);
+        let router = setup_basic_router();
+        let router = super::apply_middleware(router, config);
+        let router = crate::resolver::apply_middleware(router);
         let (listener, base_url) = setup_listener().await;
 
-        let fuzzer = async {
-            let response = reqwest::get(format!("{base_url}/test")).await.unwrap();
+        let tests = async {
+            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=abc&salt=def"))
+                .await
+                .unwrap();
             assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
 
-            let response = reqwest::get(format!("{base_url}/test")).await.unwrap();
+            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=abc&salt=def"))
+                .await
+                .unwrap();
             assert!(response.headers().get(CACHE_AGE_HEADER).is_some());
+
+            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=uvw&salt=xyz"))
+                .await
+                .unwrap();
+            assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
 
             time::pause();
             time::advance(ttl).await;
 
-            let response = reqwest::get(format!("{base_url}/test")).await.unwrap();
+            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=abc&salt=def"))
+                .await
+                .unwrap();
             assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
         };
 
         tokio::select! {
             result = axum::serve(listener, router) => result.unwrap(),
-            _ = fuzzer => {},
+            _ = tests => {},
         };
     }
 }

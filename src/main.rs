@@ -4,6 +4,7 @@ mod helpers;
 mod logging;
 mod parser;
 mod proxy;
+mod resolver;
 
 use std::io;
 use std::net::SocketAddr;
@@ -74,6 +75,7 @@ async fn main_impl(args: Args) -> io::Result<()> {
     let router = Router::new();
     let router = crate::proxy::apply_routes(router);
     let router = crate::cache::apply_middleware(router, cache_config);
+    let router = crate::resolver::apply_middleware(router);
     let router = crate::logging::apply_middleware(router);
     let router = router.route_layer(sentry_hub_middleware);
 
