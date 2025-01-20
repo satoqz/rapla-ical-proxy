@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use axum::extract::Request;
-use axum::http::Uri;
+use axum::http::{StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
@@ -41,7 +41,11 @@ pub fn apply_middleware(router: Router) -> Router {
 
 async fn resolver_middleware(mut request: Request, next: Next) -> Response {
     let Some(components) = UpstreamUrlComponents::from_request_uri(request.uri()) else {
-        return "Error: Could not determine upstream URL, check your request URL".into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "Error: Could not determine upstream URL, check your request URL",
+        )
+            .into_response();
     };
 
     request.extensions_mut().insert(components.generate_url());
