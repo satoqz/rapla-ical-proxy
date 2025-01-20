@@ -50,7 +50,9 @@ async fn resolver_middleware(mut request: Request, next: Next) -> Response {
 
 impl UpstreamUrlComponents {
     const DEFAULT_HOST: &'static str = "rapla.dhbw.de";
-    const HOST_ALLOWLIST: [&'static str; 2] = ["rapla.dhbw.de", "rapla-ravensburg.dhbw.de"];
+    const HOST_ALLOWLIST: [&'static str; 1] = ["rapla.dhbw.de"];
+    // TODO: Allow access to the Ravensburg instance once it supports the pages query parameter.
+    // const HOST_ALLOWLIST: [&'static str; 2] = ["rapla.dhbw.de", "rapla-ravensburg.dhbw.de"];
 
     fn from_request_uri(uri: &Uri) -> Option<Self> {
         // Try either:
