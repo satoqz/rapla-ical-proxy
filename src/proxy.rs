@@ -12,7 +12,7 @@ use crate::resolver::UpstreamUrlExtension;
 #[derive(Debug)]
 enum Error {
     Request(reqwest::Error),
-    Parse(crate::parser::Error),
+    Parse,
 }
 
 impl fmt::Display for Error {
@@ -20,7 +20,7 @@ impl fmt::Display for Error {
         let message = match &self {
             Self::Request(err) if err.is_status() => "Upstream returned unexpected status code",
             Self::Request(_) => "Can't connect to upstream",
-            Self::Parse(_) => "Can't parse calendar",
+            Self::Parse => "Can't parse calendar",
         };
         write!(f, "{message}")
     }
@@ -28,22 +28,16 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(match self {
-            Self::Request(err) => err,
-            Self::Parse(err) => err,
-        })
+        match self {
+            Self::Request(err) => Some(err),
+            Self::Parse => None,
+        }
     }
 }
 
 impl From<reqwest::Error> for Error {
     fn from(value: reqwest::Error) -> Self {
         Self::Request(value)
-    }
-}
-
-impl From<crate::parser::Error> for Error {
-    fn from(value: crate::parser::Error) -> Self {
-        Self::Parse(value)
     }
 }
 
@@ -54,7 +48,7 @@ impl IntoResponse for Error {
                 err.status().expect("error status should be set")
             } // Propagate whatever issue they're having.
             Self::Request(_) => StatusCode::BAD_GATEWAY,
-            Self::Parse(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Parse => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
         (
@@ -93,5 +87,7 @@ async fn handle_calendar(
     let request = client.get(&upstream.url).build()?;
     let response = client.execute(request).await?.error_for_status()?;
     let html = response.text().await?;
-    Ok(crate::parser::parse_calendar(&html, upstream.start_year)?.into_response())
+    Ok(crate::parser::parse_calendar(&html, upstream.start_year)
+        .ok_or(Error::Parse)
+        .into_response())
 }
