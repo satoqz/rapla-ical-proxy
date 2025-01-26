@@ -9,8 +9,7 @@ use axum::{Extension, Router};
 use crate::calendar::Calendar;
 use crate::resolver::UpstreamUrlExtension;
 
-#[derive(Debug)]
-enum Error {
+pub enum Error {
     Request(reqwest::Error),
     Parse,
 }
@@ -18,11 +17,17 @@ enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match &self {
-            Self::Request(err) if err.is_status() => "Upstream returned unexpected status code",
-            Self::Request(_) => "Can't connect to upstream",
-            Self::Parse => "Can't parse calendar",
+            Self::Request(err) if err.is_status() => "upstream returned unexpected status code",
+            Self::Request(_) => "can't connect to upstream",
+            Self::Parse => "can't parse calendar",
         };
         write!(f, "{message}")
+    }
+}
+
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Error").field(&self.to_string()).finish()
     }
 }
 
@@ -70,24 +75,31 @@ impl IntoResponse for Calendar {
     }
 }
 
-pub fn apply_routes(router: Router) -> Router {
+pub fn build_client() -> reqwest::Client {
     const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
-    let client = reqwest::Client::builder()
+    reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .build()
-        .expect("reqwest client should build");
-
-    router.route("/{*path}", get(handle_calendar).with_state(client))
+        .expect("reqwest client should build")
 }
 
-async fn handle_calendar(
+pub fn apply_routes(router: Router) -> Router {
+    router.route("/{*path}", get(request_handler).with_state(build_client()))
+}
+
+async fn request_handler(
     State(client): State<reqwest::Client>,
     Extension(upstream): Extension<UpstreamUrlExtension>,
 ) -> Result<Response, Error> {
+    Ok(handle(&client, upstream).await?.into_response())
+}
+
+pub async fn handle(
+    client: &reqwest::Client,
+    upstream: UpstreamUrlExtension,
+) -> Result<Calendar, Error> {
     let request = client.get(&upstream.url).build()?;
     let response = client.execute(request).await?.error_for_status()?;
     let html = response.text().await?;
-    Ok(crate::parser::parse_calendar(&html, upstream.start_year)
-        .ok_or(Error::Parse)
-        .into_response())
+    crate::parser::parse_calendar(&html, upstream.start_year).ok_or(Error::Parse)
 }

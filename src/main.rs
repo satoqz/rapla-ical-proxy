@@ -8,11 +8,14 @@ mod resolver;
 use std::io;
 use std::net::SocketAddr;
 
+use axum::http::Uri;
 use axum::Router;
 use clap::Parser;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::time::Duration;
+
+use crate::resolver::UpstreamUrlComponents;
 
 #[derive(Parser)]
 struct Args {
@@ -32,11 +35,20 @@ struct Args {
     /// Maximum cache size in Megabytes. A value of 0 results in no caching.
     #[arg(short = 's', long, env("RAPLA_CACHE_MAX_SIZE"), default_value_t = 0)]
     cache_max_size: u64,
+
+    /// Debug mode, attempt to process the given URI and print the result, then exit.
+    #[arg(short = 'd', long, env("RAPLA_DEBUG"))]
+    debug: Option<Uri>,
 }
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let args = Args::parse();
+
+    if let Some(uri) = args.debug {
+        debug(uri).await;
+        return Ok(());
+    }
 
     eprintln!("Listening on address:    {}", args.address);
     eprintln!("Cache time to live:      {}s", args.cache_ttl);
@@ -58,6 +70,26 @@ async fn main() -> io::Result<()> {
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())
         .await
+}
+
+async fn debug(uri: Uri) {
+    #[cfg(not(debug_assertions))]
+    eprintln!("note: not running in debug mode, parser tracing will be unavailable");
+
+    let upstream = UpstreamUrlComponents::from_request_uri(&uri)
+        .expect("couldn't resolve upstream")
+        .generate_url();
+
+    let client = crate::proxy::build_client();
+    let calendar = crate::proxy::handle(&client, upstream)
+        .await
+        .expect("couldn't handle request");
+
+    println!(
+        "success! calendar name: {}, number of events: {}",
+        calendar.name,
+        calendar.events.len()
+    )
 }
 
 async fn shutdown_signal() {

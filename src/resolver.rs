@@ -23,7 +23,7 @@ struct RaplaQueryWithPage {
 }
 
 #[derive(Debug, Clone)]
-struct UpstreamUrlComponents {
+pub struct UpstreamUrlComponents {
     host: String,
     page: String,
     query: RaplaBaseQuery,
@@ -58,7 +58,7 @@ impl UpstreamUrlComponents {
     // TODO: Allow access to the Ravensburg instance once it supports the pages query parameter.
     // const HOST_ALLOWLIST: [&'static str; 2] = ["rapla.dhbw.de", "rapla-ravensburg.dhbw.de"];
 
-    fn from_request_uri(uri: &Uri) -> Option<Self> {
+    pub fn from_request_uri(uri: &Uri) -> Option<Self> {
         // Try either:
         //  1. The request path, treating it as a URL (e.g. https://rapla.satoqz.net/https://rapla.dhbw.de/rapla/calendar).
         //  2. The request URL itself (e.g. https://rapla.satoqz.net/rapla/calendar).
@@ -74,7 +74,7 @@ impl UpstreamUrlComponents {
             .or_else(|| Self::from_simple_uri(uri))
     }
 
-    fn from_simple_uri(uri: &Uri) -> Option<Self> {
+    pub fn from_simple_uri(uri: &Uri) -> Option<Self> {
         let host = uri.host().unwrap_or(Self::DEFAULT_HOST);
         if !Self::HOST_ALLOWLIST.contains(&host) {
             return None;
@@ -94,7 +94,7 @@ impl UpstreamUrlComponents {
         })
     }
 
-    fn generate_url(self) -> UpstreamUrlExtension {
+    pub fn generate_url(self) -> UpstreamUrlExtension {
         // These don't need to be 100% accurate.
         const WEEKS_TWO_YEARS: usize = 104;
         const DAYS_ONE_YEAR: i64 = 365;
