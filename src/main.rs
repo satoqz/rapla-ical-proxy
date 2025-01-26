@@ -1,6 +1,5 @@
 mod cache;
 mod calendar;
-mod helpers;
 mod logging;
 mod parser;
 mod proxy;
@@ -9,11 +8,8 @@ mod resolver;
 use std::io;
 use std::net::SocketAddr;
 
-use axum::extract::Request;
-use axum::middleware::Next;
-use axum::{middleware, Router};
+use axum::Router;
 use clap::Parser;
-use sentry::{Hub, SentryFutureExt, SessionMode};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::time::Duration;
@@ -38,38 +34,18 @@ struct Args {
     cache_max_size: u64,
 }
 
-fn main() -> io::Result<()> {
-    let sentry = sentry::init(sentry::ClientOptions {
-        release: Some(env!("GIT_COMMIT_HASH").into()),
-        session_mode: SessionMode::Request,
-        auto_session_tracking: true,
-        ..Default::default()
-    });
-
+#[tokio::main]
+async fn main() -> io::Result<()> {
     let args = Args::parse();
 
     eprintln!("Listening on address:    {}", args.address);
     eprintln!("Cache time to live:      {}s", args.cache_ttl);
     eprintln!("Cache max size:          {}mb", args.cache_max_size);
-    eprintln!("Sentry enabled:          {}", sentry.is_enabled());
 
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(main_impl(args))
-}
-
-async fn main_impl(args: Args) -> io::Result<()> {
     let cache_config = crate::cache::Config {
         ttl: Duration::from_secs(args.cache_ttl),
         max_size: args.cache_max_size,
     };
-
-    let sentry_hub_middleware = middleware::from_fn(|request: Request, next: Next| async {
-        let hub = Hub::new_from_top(Hub::current());
-        next.run(request).bind_hub(hub).await
-    });
 
     // Middlewares are layered, i.e. the later it is applied the earlier it is called.
     let router = Router::new();
@@ -77,7 +53,6 @@ async fn main_impl(args: Args) -> io::Result<()> {
     let router = crate::cache::apply_middleware(router, cache_config);
     let router = crate::resolver::apply_middleware(router);
     let router = crate::logging::apply_middleware(router);
-    let router = router.route_layer(sentry_hub_middleware);
 
     let listener = TcpListener::bind(args.address).await?;
     axum::serve(listener, router)

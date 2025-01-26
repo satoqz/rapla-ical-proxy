@@ -5,12 +5,8 @@ use chrono::{Duration, NaiveDate, NaiveTime};
 use html_escape::decode_html_entities;
 use once_cell::sync::Lazy;
 use scraper::{ElementRef, Html, Selector};
-use sentry::protocol::Map;
-use sentry::Breadcrumb;
-use serde_json::Value;
 
 use crate::calendar::{Calendar, Event};
-use crate::helpers;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -25,25 +21,14 @@ impl fmt::Display for Error {
     }
 }
 
-fn breadcrumb<S: Into<String>>(message: S, data: Map<String, Value>) {
-    sentry::add_breadcrumb(Breadcrumb {
-        category: Some("parser".into()),
-        message: Some(message.into()),
-        data,
-        ..Default::default()
-    });
-}
-
 macro_rules! error {
     (html = $html:expr, $($arg:tt)*) => {{
         let message = format!($($arg)*);
-        breadcrumb(&message, helpers::map!({ "html": $html }));
         Error(message)
     }};
 
     ($($arg:tt)*) => {{
         let message = format!($($arg)*);
-        breadcrumb(&message, Map::new());
         Error(message)
     }};
 }
@@ -55,10 +40,9 @@ macro_rules! select {
     }};
 
     ($element:expr, $query:expr, $method:ident) => {
-        select!($element, $query).$method().ok_or_else(|| {
-            breadcrumb("Used query selector", helpers::map!({ "selector": $query }));
-            error!("Query selector didn't yield any elements")
-        })
+        select!($element, $query)
+            .$method()
+            .ok_or_else(|| error!("Query selector didn't yield any elements"))
     };
 }
 
