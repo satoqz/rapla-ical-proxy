@@ -1,5 +1,4 @@
-use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt;
 use std::ops::Not;
 
 use chrono::{Duration, NaiveDate, NaiveTime};
@@ -13,15 +12,15 @@ use serde_json::Value;
 use crate::calendar::{Calendar, Event};
 use crate::helpers;
 
-pub type Result<T> = std::result::Result<T, ParseError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub struct ParseError(pub String);
+pub struct Error(pub String);
 
-impl Error for ParseError {}
+impl std::error::Error for Error {}
 
-impl Display for ParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "{}", self.0)
     }
 }
@@ -39,13 +38,13 @@ macro_rules! error {
     (html = $html:expr, $($arg:tt)*) => {{
         let message = format!($($arg)*);
         breadcrumb(&message, helpers::map!({ "html": $html }));
-        ParseError(message)
+        Error(message)
     }};
 
     ($($arg:tt)*) => {{
         let message = format!($($arg)*);
         breadcrumb(&message, Map::new());
-        ParseError(message)
+        Error(message)
     }};
 }
 

@@ -1,67 +1,65 @@
-use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt;
 
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
-use reqwest::{Client, Error as ReqwestError, StatusCode};
 use sentry::protocol::Map;
 use sentry::Breadcrumb;
 use serde_json::Value;
 
 use crate::calendar::Calendar;
 use crate::helpers;
-use crate::parser::{parse_calendar, ParseError};
 use crate::resolver::UpstreamUrlExtension;
 
 #[derive(Debug)]
-struct ProxyError {
+struct Error {
     message: &'static str,
-    kind: ProxyErrorKind,
+    kind: ErrorKind,
 }
 
 #[derive(Debug)]
-enum ProxyErrorKind {
-    Reqwest(ReqwestError),
-    Status(StatusCode),
-    Parse(ParseError),
+enum ErrorKind {
+    Reqwest(reqwest::Error),
+    Status(reqwest::StatusCode),
+    Parse(crate::parser::Error),
 }
 
-impl ProxyError {
-    pub fn new(message: &'static str, kind: ProxyErrorKind) -> Self {
+impl Error {
+    pub fn new(message: &'static str, kind: ErrorKind) -> Self {
         Self { message, kind }
     }
 }
 
-impl Error for ProxyError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.kind {
-            ProxyErrorKind::Reqwest(err) => Some(err),
-            ProxyErrorKind::Parse(err) => Some(err),
-            ProxyErrorKind::Status(_) => None,
+            ErrorKind::Reqwest(err) => Some(err),
+            ErrorKind::Parse(err) => Some(err),
+            ErrorKind::Status(_) => None,
         }
     }
 }
 
-impl Display for ProxyError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
-impl ProxyError {
+impl Error {
     fn capture(self) -> Self {
         sentry::capture_error(&self);
         self
     }
 }
 
-impl IntoResponse for ProxyError {
+impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let status = match self.kind {
-            ProxyErrorKind::Reqwest(_) => StatusCode::BAD_GATEWAY,
-            ProxyErrorKind::Parse(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ProxyErrorKind::Status(status) => status, // Propagate whatever issue they're having.
+            ErrorKind::Reqwest(_) => StatusCode::BAD_GATEWAY,
+            ErrorKind::Parse(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorKind::Status(status) => status, // Propagate whatever issue they're having.
         };
 
         (
@@ -102,25 +100,25 @@ async fn handle_calendar(
     });
 
     if !status.is_success() {
-        return Err(ProxyError::new(
+        return Err(Error::new(
             "Upstream returned bad status code",
-            ProxyErrorKind::Status(status),
+            ErrorKind::Status(status),
         ));
     }
 
     let html = response.text().await.map_err(|err| {
-        ProxyError::new(
+        Error::new(
             "Couldn't parse body returned by upstream",
-            ProxyErrorKind::Reqwest(err),
+            ErrorKind::Reqwest(err),
         )
         // I'd be curious to know if this ever occurs.
         .capture()
     })?;
 
-    parse_calendar(&html, upstream.start_year).map_err(|err| {
-        ProxyError::new(
+    crate::parser::parse_calendar(&html, upstream.start_year).map_err(|err| {
+        Error::new(
             "Couldn't parse HTML returned by upstream",
-            ProxyErrorKind::Parse(err),
+            ErrorKind::Parse(err),
         )
         // These are the important errors we really want to track.
         // Given that Rapla returned a successful status code for a set of well-formed
@@ -140,21 +138,20 @@ fn breadcrumb(message: &str, ty: &str, data: Map<String, Value>) {
     });
 }
 
-async fn send_request(url: &str) -> Result<reqwest::Response, ProxyError> {
+async fn send_request(url: &str) -> Result<reqwest::Response, Error> {
     let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
-    let client = Client::builder()
+    let client = reqwest::Client::builder()
         .user_agent(user_agent)
         .build()
-        .map_err(|err| {
-            ProxyError::new("Couldn't connect to upstream", ProxyErrorKind::Reqwest(err))
-        })?;
+        .map_err(|err| Error::new("Couldn't connect to upstream", ErrorKind::Reqwest(err)))?;
 
-    let request = client.get(url).build().map_err(|err| {
-        ProxyError::new("Couldn't connect to upstream", ProxyErrorKind::Reqwest(err))
-    })?;
+    let request = client
+        .get(url)
+        .build()
+        .map_err(|err| Error::new("Couldn't connect to upstream", ErrorKind::Reqwest(err)))?;
 
     client
         .execute(request)
         .await
-        .map_err(|err| ProxyError::new("Request to upstream failed", ProxyErrorKind::Reqwest(err)))
+        .map_err(|err| Error::new("Request to upstream failed", ErrorKind::Reqwest(err)))
 }
