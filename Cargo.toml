@@ -23,7 +23,7 @@ default-features = false
 features = ["rustls-tls-webpki-roots", "charset"]
 
 [dependencies.scraper]
-version = "0.22"
+version = "0.23"
 default-features = false
 
 [dependencies.chrono]
