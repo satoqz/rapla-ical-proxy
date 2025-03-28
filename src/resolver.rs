@@ -3,7 +3,7 @@ use std::str::FromStr;
 use axum::extract::Request;
 use axum::http::{StatusCode, Uri};
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::Router;
 use chrono::{Datelike, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -48,15 +48,23 @@ async fn resolver_middleware(mut request: Request, next: Next) -> Response {
             .into_response();
     };
 
+    if components.page == "ical" {
+        return Redirect::permanent(&format!(
+            "/rapla/calendar?{}",
+            serde_urlencoded::to_string(components.query).unwrap()
+        ))
+        .into_response();
+    }
+
     request.extensions_mut().insert(components.generate_url());
     next.run(request).await
 }
 
 impl UpstreamUrlComponents {
-    const DEFAULT_HOST: &'static str = "rapla.dhbw.de";
-    const HOST_ALLOWLIST: [&'static str; 1] = ["rapla.dhbw.de"];
+    const DEFAULT_HOST: &str = "rapla.dhbw.de";
+    const HOST_ALLOWLIST: &[&str] = &[Self::DEFAULT_HOST];
     // TODO: Allow access to the Ravensburg instance once it supports the pages query parameter.
-    // const HOST_ALLOWLIST: [&'static str; 2] = ["rapla.dhbw.de", "rapla-ravensburg.dhbw.de"];
+    // const HOST_ALLOWLIST: &[&str] = &[Self::DEFAULT_HOST, "rapla-ravensburg.dhbw.de"];
 
     pub fn from_request_uri(uri: &Uri) -> Option<Self> {
         // Try either:
@@ -83,8 +91,11 @@ impl UpstreamUrlComponents {
         let query: RaplaQueryWithPage = serde_urlencoded::from_str(uri.query()?).ok()?;
         let page = query.page.or_else(|| {
             let path = uri.path();
-            path.starts_with("/rapla/")
-                .then(|| path.trim_start_matches("/rapla/").to_string())
+            path.starts_with("/rapla/").then(|| {
+                path.trim_start_matches("/rapla/")
+                    .trim_end_matches('/')
+                    .to_string()
+            })
         })?;
 
         Some(UpstreamUrlComponents {
