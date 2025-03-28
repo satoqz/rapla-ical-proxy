@@ -3,7 +3,7 @@ use std::str::FromStr;
 use axum::extract::Request;
 use axum::http::{StatusCode, Uri};
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use axum::Router;
 use chrono::{Datelike, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,7 @@ pub fn apply_middleware(router: Router) -> Router {
 }
 
 async fn resolver_middleware(mut request: Request, next: Next) -> Response {
-    let Some(components) = UpstreamUrlComponents::from_request_uri(request.uri()) else {
+    let Some(mut components) = UpstreamUrlComponents::from_request_uri(request.uri()) else {
         return (
             StatusCode::BAD_REQUEST,
             "Error: Could not determine upstream URL, check your request URL",
@@ -49,11 +49,7 @@ async fn resolver_middleware(mut request: Request, next: Next) -> Response {
     };
 
     if components.page == "ical" {
-        return Redirect::permanent(&format!(
-            "/rapla/calendar?{}",
-            serde_urlencoded::to_string(components.query).unwrap()
-        ))
-        .into_response();
+        components.page = "calendar".into()
     }
 
     request.extensions_mut().insert(components.generate_url());
