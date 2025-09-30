@@ -113,7 +113,8 @@ impl UpstreamUrlComponents {
         let year_ago = now - Duration::try_days(DAYS_ONE_YEAR).unwrap();
 
         // Parse cutoff_date if provided, otherwise use year_ago
-        let cutoff = self.cutoff_date
+        let cutoff = self
+            .cutoff_date
             .and_then(|date_str| {
                 chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
                     .map(|date| date.and_hms_opt(0, 0, 0).unwrap().and_utc())
