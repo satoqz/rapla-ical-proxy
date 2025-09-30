@@ -1,6 +1,6 @@
 [package]
 name = "rapla-ical-proxy"
-edition = "2021"
+edition = "2024"
 
 [dependencies.clap]
 version = "4.5"
