@@ -109,9 +109,6 @@ impl UpstreamUrlComponents {
         const WEEKS_TWO_YEARS: usize = 104;
         const DAYS_ONE_YEAR: i64 = 365;
 
-        let now = Utc::now();
-        let year_ago = now - Duration::try_days(DAYS_ONE_YEAR).unwrap();
-
         // Parse cutoff_date if provided, otherwise use year_ago
         let cutoff = self
             .cutoff_date
@@ -120,7 +117,7 @@ impl UpstreamUrlComponents {
                     .map(|date| date.and_hms_opt(0, 0, 0).unwrap().and_utc())
                     .ok()
             })
-            .unwrap_or(year_ago);
+            .unwrap_or(Utc::now() - Duration::try_days(DAYS_ONE_YEAR).unwrap());
 
         let url = format!(
             "https://{}/rapla/{}?day={}&month={}&year={}&pages={WEEKS_TWO_YEARS}&{}",
