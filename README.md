@@ -24,6 +24,7 @@ This shouldn't take you more than 5 minutes:
 
 Congratulations, you no longer need the HTML-based rapla calendar. The calendar subscription you just created will automatically stay in sync with any updates made to your schedule.
 
+You can also choose not to include events prior to a cutoff by appending `&cutoff_date=YYYY-MM-DD` to the URL.
 ## Architecture
 
 ![Architecture Diagram](./docs/architecture.png)
