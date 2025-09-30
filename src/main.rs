@@ -8,8 +8,8 @@ mod resolver;
 use std::io;
 use std::net::SocketAddr;
 
-use axum::http::Uri;
 use axum::Router;
+use axum::http::Uri;
 use clap::Parser;
 use tokio::net::TcpListener;
 use tokio::signal;

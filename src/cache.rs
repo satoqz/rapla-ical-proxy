@@ -7,8 +7,8 @@ use axum::http::response::Parts;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Router};
-use quick_cache::sync::Cache;
 use quick_cache::Weighter;
+use quick_cache::sync::Cache;
 use tokio::task;
 use tokio::time::{self, Duration, Instant};
 
@@ -133,12 +133,12 @@ async fn cache_middleware(
 mod tests {
     use std::net::SocketAddr;
 
-    use axum::routing;
     use axum::Router;
+    use axum::routing;
     use tokio::net::TcpListener;
     use tokio::time::{self, Duration};
 
-    use super::{Config, CACHE_AGE_HEADER};
+    use super::{CACHE_AGE_HEADER, Config};
 
     async fn setup_listener() -> (TcpListener, String) {
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));

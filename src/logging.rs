@@ -1,12 +1,12 @@
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use axum::Router;
 use axum::extract::{Request, State};
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use axum::Router;
 
 pub fn apply_middleware(router: Router) -> Router {
     router.route_layer(middleware::from_fn_with_state(
