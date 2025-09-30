@@ -20,6 +20,7 @@ struct RaplaQueryWithPage {
     #[serde(flatten)]
     base: RaplaBaseQuery,
     page: Option<String>,
+    cutoff_date: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,7 @@ pub struct UpstreamUrlComponents {
     host: String,
     page: String,
     query: RaplaBaseQuery,
+    cutoff_date: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +100,7 @@ impl UpstreamUrlComponents {
             host: host.to_string(),
             page,
             query: query.base,
+            cutoff_date: query.cutoff_date,
         })
     }
 
@@ -106,23 +109,30 @@ impl UpstreamUrlComponents {
         const WEEKS_TWO_YEARS: usize = 104;
         const DAYS_ONE_YEAR: i64 = 365;
 
-        let now = Utc::now();
-        let year_ago = now - Duration::try_days(DAYS_ONE_YEAR).unwrap();
+        // Parse cutoff_date if provided, otherwise use year_ago
+        let cutoff = self
+            .cutoff_date
+            .and_then(|date_str| {
+                chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                    .map(|date| date.and_hms_opt(0, 0, 0).unwrap().and_utc())
+                    .ok()
+            })
+            .unwrap_or(Utc::now() - Duration::try_days(DAYS_ONE_YEAR).unwrap());
 
         let url = format!(
             "https://{}/rapla/{}?day={}&month={}&year={}&pages={WEEKS_TWO_YEARS}&{}",
             self.host,
             self.page,
-            year_ago.day(),
-            year_ago.month(),
-            year_ago.year(),
+            cutoff.day(),
+            cutoff.month(),
+            cutoff.year(),
             // There's no reason this should fail, we already parsed it in the first place.
             serde_urlencoded::to_string(self.query).unwrap()
         );
 
         UpstreamUrlExtension {
             url,
-            start_year: year_ago.year(),
+            start_year: cutoff.year(),
         }
     }
 }
