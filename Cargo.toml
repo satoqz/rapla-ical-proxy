@@ -40,6 +40,5 @@ features = ["preserve_order"]
 [dependencies]
 html-escape = "0.2"
 ics = "0.5"
-once_cell = "1.21"
 quick_cache = "0.6"
 serde_urlencoded = "0.7"

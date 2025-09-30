@@ -1,8 +1,8 @@
 use std::ops::Not;
+use std::sync::OnceLock;
 
 use chrono::{Duration, NaiveDate, NaiveTime};
 use html_escape::decode_html_entities;
-use once_cell::sync::Lazy;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::calendar::{Calendar, Event};
@@ -51,8 +51,8 @@ macro_rules! trace_err {
 
 macro_rules! select {
     ($element:expr, $query:expr) => {{
-        static SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse($query).unwrap());
-        $element.select(&SELECTOR)
+        static SELECTOR: OnceLock<Selector> = OnceLock::new();
+        $element.select(SELECTOR.get_or_init(|| Selector::parse($query).unwrap()))
     }};
 }
 

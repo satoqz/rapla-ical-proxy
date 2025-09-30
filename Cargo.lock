@@ -1163,7 +1163,6 @@ dependencies = [
  "clap",
  "html-escape",
  "ics",
- "once_cell",
  "quick_cache",
  "reqwest",
  "scraper",
