@@ -1,8 +1,6 @@
 [package]
 name = "rapla-ical-proxy"
-version = "0.1.0"
 edition = "2021"
-repository = "https://github.com/satoqz/rapla-ical-proxy"
 
 [dependencies.clap]
 version = "4.5"
@@ -45,6 +43,3 @@ ics = "0.5"
 once_cell = "1.21"
 quick_cache = "0.6"
 serde_urlencoded = "0.7"
-
-[profile.release]
-opt-level = 3
