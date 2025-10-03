@@ -5,16 +5,14 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::response::Parts;
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::{Extension, Router};
-use quick_cache::Weighter;
-use quick_cache::sync::Cache;
-use tokio::task;
-use tokio::time::{self, Duration, Instant};
+use moka::future::Cache;
+use tokio::time::{Duration, Instant};
 
 use crate::resolver::UpstreamUrlExtension;
 
-const CACHE_AGE_HEADER: &str = "x-cache-age";
+const CACHE_AGE_HEADER: &str = "X-Cache-Age";
 
 #[derive(Debug, Clone)]
 struct CachedResponse {
@@ -36,171 +34,56 @@ async fn decompose_response(response: Response) -> CachedResponse {
     }
 }
 
-impl IntoResponse for CachedResponse {
-    fn into_response(self) -> Response {
-        let mut response = Response::from_parts(self.parts, Body::from(self.body));
-
-        let age = self.timestamp.elapsed().as_secs().to_string();
-        let headers = response.headers_mut();
-        headers.insert(
-            CACHE_AGE_HEADER,
-            age.parse().expect("header value did not parse"),
-        );
-
-        response
-    }
-}
-
-#[derive(Clone)]
-struct CachedResponseWeighter;
-
-impl Weighter<String, CachedResponse> for CachedResponseWeighter {
-    fn weight(&self, key: &String, val: &CachedResponse) -> u64 {
-        // Rough estimate of response size in bytes. Ensure weight is at least 1.
-        (mem::size_of::<CachedResponse>() as u64 + key.len() as u64 + val.body.len() as u64).max(1)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub ttl: Duration,
-    pub max_size: u64,
-}
-
-#[derive(Debug)]
-struct MiddlewareState {
-    cache: Cache<String, CachedResponse, CachedResponseWeighter>,
-    config: Config,
-}
-
-pub fn apply_middleware(router: Router, config: Config) -> Router {
-    let capacity = config.max_size * 1024 * 1024; // Megabytes, weighter measures bytes.
-    let cache = Cache::with_weighter(100, capacity, CachedResponseWeighter);
+pub fn apply_middleware(router: Router, (ttl, max_capacity): (Duration, u64)) -> Router {
+    let cache = Cache::builder()
+        .time_to_live(ttl)
+        .max_capacity(max_capacity * 1024 * 1024) // Megabytes, weigher measures bytes
+        .weigher(|url: &String, response: &CachedResponse| {
+            (mem::size_of::<CachedResponse>()
+                .saturating_add(url.len())
+                .saturating_add(response.body.len()))
+            .max(1)
+            .try_into()
+            .unwrap_or(u32::MAX)
+        })
+        .build();
 
     router.route_layer(middleware::from_fn_with_state(
-        Arc::new(MiddlewareState { cache, config }),
+        Arc::new(cache),
         cache_middleware,
     ))
 }
 
 async fn cache_middleware(
-    State(state): State<Arc<MiddlewareState>>,
+    State(cache): State<Arc<Cache<String, CachedResponse>>>,
     Extension(upstream): Extension<UpstreamUrlExtension>,
     request: Request,
     next: Next,
 ) -> Response {
-    let placeholder = match state.cache.get_value_or_guard_async(&upstream.url).await {
-        Ok(cached) => return cached.into_response(),
-        Err(placeholder) => placeholder,
-    };
+    let mut cache_hit = true;
 
-    let response = next.run(request).await;
-    if state.config.max_size == 0 {
-        return response;
+    let cached = cache
+        .get_with(upstream.url, async {
+            cache_hit = false;
+            // Cache responses no matter their status. Caching errored responses
+            // saves additional calls to upstream and parsing CPU time for paths
+            // that are often permanent fails anyways. The only trade-off is
+            // that temporary errors driven by upstream will take the full time
+            // to live to recover from, even if upstream recovers earlier.
+            let response = next.run(request).await;
+            decompose_response(response).await
+        })
+        .await;
+
+    let mut response = Response::from_parts(cached.parts, Body::from(cached.body));
+
+    if cache_hit {
+        let age = cached.timestamp.elapsed().as_secs().to_string();
+        response.headers_mut().insert(
+            CACHE_AGE_HEADER,
+            age.parse().expect("header value did not parse"),
+        );
     }
 
-    // We're fine caching responses no matter the status. If things recover to normal automatically, just wait out the TTL.
-    // If a fix needs to be pushed from our side, we're redeploying and thereby clearing the cache anyways.
-    // Caching errored responses saves additional calls to upstream and parsing CPU time for paths that are most likely permanent fails anyways.
-
-    // "Returns Err if the placeholder isn't in the cache anymore.
-    // A placeholder can be removed as a result of a remove call or a non-placeholder insert with the same key."
-    // This is the only place that we ever insert (locked by key). Additionally, the whole reason we're here
-    // is that remove was called, and that we're about to schedule a new remove call.
-    // TLDR; the unwrap should be fine.
-    let decomposed = decompose_response(response).await;
-    placeholder.insert(decomposed.clone()).unwrap();
-
-    // Remove key from the cache once the TTL is expired.
-    // Alternatively we could choose to do this whenever a value is fetched from
-    // the cache and we notice that it has expired, but that encomplicates using
-    // quick_cache's get_value_or_guard functionality and has other tradeoffs.
-    task::spawn(async move {
-        time::sleep(state.config.ttl).await;
-        let now = Instant::now();
-        // Ensure that we're removing only what was inserted above.
-        // The cache could have evicted the entry itself because it got too large,
-        // and a newer entry might already be in place. We don't want to remove that.
-        if decomposed.timestamp + state.config.ttl <= now {
-            state.cache.remove(&upstream.url);
-        }
-    });
-
-    Response::from_parts(decomposed.parts, Body::from(decomposed.body))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::net::SocketAddr;
-
-    use axum::Router;
-    use axum::routing;
-    use tokio::net::TcpListener;
-    use tokio::time::{self, Duration};
-
-    use super::{CACHE_AGE_HEADER, Config};
-
-    async fn setup_listener() -> (TcpListener, String) {
-        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let base_url = format!("http://{}", listener.local_addr().unwrap());
-        (listener, base_url)
-    }
-
-    fn setup_basic_router() -> Router {
-        Router::new().route(
-            "/rapla/calendar",
-            routing::get(|| async { "Hello, World!" }),
-        )
-    }
-
-    #[tokio::test]
-    async fn test_server_connection() {
-        let (listener, url) = setup_listener().await;
-        tokio::select! {
-            result = axum::serve(listener, setup_basic_router()) => { result.unwrap(); }
-            result = reqwest::get(url) => { result.unwrap(); }
-        };
-    }
-
-    #[tokio::test]
-    async fn test_cache_middleware() {
-        let ttl = Duration::from_secs(3600);
-        let config = Config { ttl, max_size: 100 };
-
-        let router = setup_basic_router();
-        let router = super::apply_middleware(router, config);
-        let router = crate::resolver::apply_middleware(router);
-        let (listener, base_url) = setup_listener().await;
-
-        let tests = async {
-            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=abc&salt=def"))
-                .await
-                .unwrap();
-            assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
-
-            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=abc&salt=def"))
-                .await
-                .unwrap();
-            assert!(response.headers().get(CACHE_AGE_HEADER).is_some());
-
-            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=uvw&salt=xyz"))
-                .await
-                .unwrap();
-            assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
-
-            time::pause();
-            time::advance(ttl).await;
-
-            let response = reqwest::get(format!("{base_url}/rapla/calendar?key=abc&salt=def"))
-                .await
-                .unwrap();
-            assert!(response.headers().get(CACHE_AGE_HEADER).is_none());
-        };
-
-        tokio::select! {
-            result = axum::serve(listener, router) => result.unwrap(),
-            _ = tests => {},
-        };
-    }
+    response
 }

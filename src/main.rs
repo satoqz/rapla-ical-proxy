@@ -54,15 +54,12 @@ async fn main() -> io::Result<()> {
     eprintln!("Cache time to live:      {}s", args.cache_ttl);
     eprintln!("Cache max size:          {}mb", args.cache_max_size);
 
-    let cache_config = crate::cache::Config {
-        ttl: Duration::from_secs(args.cache_ttl),
-        max_size: args.cache_max_size,
-    };
+    let cache_params = (Duration::from_secs(args.cache_ttl), args.cache_max_size);
 
     // Middlewares are layered, i.e. the later it is applied the earlier it is called.
     let router = Router::new();
     let router = crate::proxy::apply_routes(router);
-    let router = crate::cache::apply_middleware(router, cache_config);
+    let router = crate::cache::apply_middleware(router, cache_params);
     let router = crate::resolver::apply_middleware(router);
     let router = crate::logging::apply_middleware(router);
 
