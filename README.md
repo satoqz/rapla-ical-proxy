@@ -1,44 +1,95 @@
 # rapla-ical-proxy
 
-[![Build](https://img.shields.io/github/actions/workflow/status/satoqz/rapla-ical-proxy/build-push.yml?label=build&logo=docker)](https://github.com/satoqz/rapla-ical-proxy/pkgs/container/rapla-ical-proxy)
-[![Checks](https://img.shields.io/github/actions/workflow/status/satoqz/rapla-ical-proxy/checks.yml?label=checks&logo=github)](https://github.com/satoqz/rapla-ical-proxy/actions/workflows/checks.yml)
-[![Fly.io](https://img.shields.io/github/deployments/satoqz/rapla-ical-proxy/production?label=fly.io&logo=fly.io)](https://github.com/satoqz/rapla-ical-proxy/deployments/production)
+This tool proxies requests to [DHBW](https://www.dhbw.de/english/home)'s HTML
+[class schedule site](https://rapla.dhbw.de) into [ICS](https://icalendar.org)
+calendars on the fly. This lets you import your class schedule into "real"
+calendar software such such as Outlook, Google Calendar, etc. and keep
+automatically receiving the latest schedule.
 
-- [**Quickstart**](#quickstart)
-- [**Architecture**](#architecture)
-- [**Self-hosting**](#self-hosting)
+> [!TIP]
+> If you study at DHBW and want to view your class schedule together with your
+> work schedule in one and the same calendar app, **this is what you're looking
+> for**.
 
-**rapla-ical-proxy** proxies requests to the HTML-based class schedule page of DHBW to the iCalendar format such that it can be imported and continuously synced into proper calendar software such as Outlook, Google Calendar and lots of others.
+## Guide
 
-If you are a dual student at DHBW looking to view your work schedule together with your class schedule in the same calendar app, this is the solution you're looking for.
+Getting started is easy and requires zero setup if you use the official instance
+at [rapla.satoqz.net](https://rapla.satoqz.net).
 
-## Quickstart
+1. Get your Rapla link ready. This should be a decently long URL of the
+   following shape:
 
-This shouldn't take you more than 5 minutes:
+  ```yaml
+  https://rapla.dhbw.de/rapla/...
+  ```
 
-1. Get your rapla link ready. This should be a decently long URL starting with "https://rapla.dhbw.de/...".
+2. Replace the domain name `rapla.dhbw.de` with `rapla.satoqz.net` (Or the
+   hostname of another instance, see [self-hosting](#self-hosting)!). **Keep all
+   other URL components the same!**
 
-2. Replace "dhbw.de" with "satoqz.net".
+  ```diff
+  - https://rapla.dhbw.de/rapla/rest
+  + https://rapla.satoqz.net/rapla/rest
+  ```
 
-3. Paste the result into the "New calendar subscription" feature of your calendar app. The name of the feature may vary based on what app you're using.
+3. Create a new calendar subscription in your calendar app. Paste in the
+   modified URL. Done!
 
-Congratulations, you no longer need the HTML-based rapla calendar. The calendar subscription you just created will automatically stay in sync with any updates made to your schedule.
+### Advanced Usage
 
-You can also choose not to include events prior to a cutoff by appending `&cutoff_date=YYYY-MM-DD` to the URL.
-## Architecture
+By default, you will always receive any available events in within the `(now - 1
+year, now + 1 year)` range.
 
-![Architecture Diagram](./docs/architecture.png)
+If you'd like to avoid filling past calendar history with events beyond a
+certain date, you can add the `cutoff_date` URL parameter:
+
+```yaml
+https://rapla.dhbw.de/rapla/calendar?other=parameters&cutoff_date=YYYY-MM-DD
+```
+
+This will shift the two-year range that is scanned by default to start at the
+specified cutoff date.
 
 ## Self-hosting
 
-You can easily deploy the proxy yourself using the container image built by GitHub Actions (Both `linux/amd64` and `linux/arm64` are supported)
+The proxy is a simple single-binary webserver with no external dependencies.
+You can deploy it on a VPS, serverless, or even on your local system directly in
+front of your calendar software.
+
+### Container Images
+
+Distroless container images are tagged by commit hash and available for both
+`linux/amd64` and `linux/arm64`.
 
 ```sh
-docker run -p 8080:8080 ghcr.io/satoqz/rapla-ical-proxy
-```
+# Pull the latest commit:
+docker pull ghcr.io/satoqz/rapla-ical-proxy:latest
 
-You can customize address/port configuration and caching behavior using command line flags and/or environment variables. To list available options, run:
+# Pull a specific commit by full hash:
+docker pull ghcr.io/satoqz/rapla-ical-proxy:$GIT_HASH
 
-```sh
-docker run ghcr.io/satoqz/rapla-ical-proxy --help
-```
+# Or by short hash:
+docker pull ghcr.io/satoqz/rapla-ical-proxy:$SHORT_GIT_HASH
+
+# Run it:
+docker run --rm -d -p 8080:8080 -e RAPLA_CACHE_MAX_SIZE=100 ghcr.io/satoqz/rapla-ical-proxy
+
+# Make sure it works:
+curl -I http://localhost:8080/rapla/calendar/...
+````
+
+### Environment Variables
+
+The proxy respects the following environment variables:
+
+| Environment            | Default          | Description                                  |
+| ---------------------- | ---------------- | -------------------------------------------- |
+| `RAPLA_ADDRESS`        | `127.0.0.1:8080` | Socket address to listen at                  |
+| `RAPLA_CACHE_TTL`      | `3600` (1 hour)  | Time-to-live for cached calendars in seconds |
+| `RAPLA_CACHE_MAX_SIZE` | `0`              | Maximum (estimated) cache size in Megabytes  |
+
+> [!NOTE]
+> Setting `RAPLA_CACHE_MAX_SIZE` to `0` (the default) effectively disables
+> caching. For production usage, I recommend allocating at least a couple of
+> megabytes to caching. This saves a lot of network traffic and CPU time both on
+> the proxy host and the upstream Rapla server.

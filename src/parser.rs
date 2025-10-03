@@ -163,9 +163,9 @@ fn parse_event(element: ElementRef, date: NaiveDate) -> Option<Event> {
     let start_time_raw = times_raw_split.next().inspect_none(trace_none!())?;
     let end_time_raw = times_raw_split.next().inspect_none(trace_none!())?;
 
-    // Some genuises at DHBW find it a great idea to leave out the start and/or end time
-    // to signify "full day" which is to be interpreted as "from 08:00 until 18:00".
-    // The dash in the middle is always there though. For now.
+    // Some geniuses at DHBW find it a great idea to leave out the start and/or
+    // end time to signify "full day" which is to be interpreted as "from 08:00
+    // until 18:00". The dash in the middle is always there though. For now.
     let start = if start_time_raw.is_empty() {
         NaiveTime::from_hms_opt(8, 0, 0).unwrap()
     } else {

@@ -5,100 +5,87 @@ mod parser;
 mod proxy;
 mod resolver;
 
-use std::io;
+use std::env::{self, VarError};
+use std::fmt::Display;
 use std::net::SocketAddr;
+use std::str::FromStr;
 
 use axum::Router;
-use axum::http::Uri;
-use clap::Parser;
 use tokio::net::TcpListener;
-use tokio::signal;
 use tokio::time::Duration;
 
-use crate::resolver::UpstreamUrlComponents;
-
-#[derive(Parser)]
-struct Args {
-    /// Socket address (IP and port) to listen on.
-    #[arg(
-        short,
-        long,
-        env("RAPLA_ADDRESS"),
-        default_value_t = SocketAddr::from(([127, 0, 0, 1], 8080))
-    )]
-    address: SocketAddr,
-
-    /// Time-to-live for cached responses (in seconds).
-    #[arg(short = 't', long, env("RAPLA_CACHE_TTL"), default_value_t = 3600)]
-    cache_ttl: u64,
-
-    /// Maximum cache size in Megabytes. A value of 0 results in no caching.
-    #[arg(short = 's', long, env("RAPLA_CACHE_MAX_SIZE"), default_value_t = 0)]
-    cache_max_size: u64,
-
-    /// Debug mode, attempt to process the given URI and print the result, then exit.
-    #[arg(short = 'd', long, env("RAPLA_DEBUG"))]
-    debug: Option<Uri>,
-}
-
 #[tokio::main]
-async fn main() -> io::Result<()> {
-    let args = Args::parse();
+async fn main() -> std::io::Result<()> {
+    // Single-shot debug mode for parser development.
+    #[cfg(debug_assertions)]
+    if let Some(uri) = getenv("RAPLA_DEBUG") {
+        use crate::proxy::{build_client, handle};
+        use crate::resolver::UpstreamUrlComponents;
 
-    if let Some(uri) = args.debug {
-        debug(uri).await;
+        let calendar = handle(
+            &build_client(),
+            UpstreamUrlComponents::from_request_uri(&uri)
+                .expect("couldn't resolve upstream")
+                .generate_url(),
+        )
+        .await
+        .expect("couldn't handle request");
+
+        eprintln!("{calendar:#?}");
+
         return Ok(());
     }
 
-    eprintln!("Listening on address:    {}", args.address);
-    eprintln!("Cache time to live:      {}s", args.cache_ttl);
-    eprintln!("Cache max size:          {}mb", args.cache_max_size);
+    let address =
+        getenv("RAPLA_ADDRESS").unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 8080)));
 
-    let cache_params = (Duration::from_secs(args.cache_ttl), args.cache_max_size);
+    let cache_ttl = Duration::from_secs(getenv("RAPLA_CACHE_TTL").unwrap_or(3600));
+    let cache_capacity = getenv("RAPLA_CACHE_MAX_SIZE").unwrap_or(0);
 
     // Middlewares are layered, i.e. the later it is applied the earlier it is called.
     let router = Router::new();
     let router = crate::proxy::apply_routes(router);
-    let router = crate::cache::apply_middleware(router, cache_params);
+    let router = crate::cache::apply_middleware(router, (cache_ttl, cache_capacity));
     let router = crate::resolver::apply_middleware(router);
     let router = crate::logging::apply_middleware(router);
 
-    let listener = TcpListener::bind(args.address).await?;
+    let listener = TcpListener::bind(address).await?;
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())
         .await
 }
 
-async fn debug(uri: Uri) {
-    #[cfg(not(debug_assertions))]
-    eprintln!("note: not running in debug mode, parser tracing will be unavailable");
+fn getenv<T: FromStr>(key: &str) -> Option<T>
+where
+    T::Err: Display,
+{
+    use std::process;
 
-    let upstream = UpstreamUrlComponents::from_request_uri(&uri)
-        .expect("couldn't resolve upstream")
-        .generate_url();
+    let val = match env::var(key) {
+        Ok(val) => val,
+        Err(VarError::NotPresent) => return None,
+        Err(err) => {
+            eprintln!("Invalid ${key}: {err}");
+            process::exit(1);
+        }
+    };
 
-    let client = crate::proxy::build_client();
-    let calendar = crate::proxy::handle(&client, upstream)
-        .await
-        .expect("couldn't handle request");
-
-    println!(
-        "success! calendar name: {}, number of events: {}",
-        calendar.name,
-        calendar.events.len()
-    )
+    Some(T::from_str(&val).unwrap_or_else(|err| {
+        eprintln!("Invalid ${key}: {err}");
+        process::exit(1);
+    }))
 }
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        signal::ctrl_c()
+        tokio::signal::ctrl_c()
             .await
             .expect("failed to install ctrl-c handler");
     };
 
     #[cfg(unix)]
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("failed to install signal handler")
             .recv()
             .await

@@ -3,11 +3,13 @@ use ics::parameters::TzIDParam;
 use ics::properties::{Description, DtEnd, DtStart, Location, Organizer, RRule, Summary, TzName};
 use ics::{Daylight, Standard, TimeZone};
 
+#[derive(Debug)]
 pub struct Calendar {
     pub name: String,
     pub events: Vec<Event>,
 }
 
+#[derive(Debug)]
 pub struct Event {
     pub date: NaiveDate,
     pub start: NaiveTime,
