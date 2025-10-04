@@ -1,4 +1,4 @@
-name: build-push
+name: Build
 
 on:
   push:
@@ -10,7 +10,7 @@ env:
   BIN: rapla-ical-proxy
 
 jobs:
-  build:
+  compile-binary:
     strategy:
       matrix:
         arch: [aarch64, x86_64]
@@ -31,27 +31,35 @@ jobs:
       - name: Set up Rust cache
         uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
 
-      - name: Prepare Rust toolchain for ${{ env.RUST_TARGET }}
+      - name: Set up Rust toolchain
+        run: rustup target add '${{ env.RUST_TARGET }}'
+
+      - name: Set up cargo-zigbuild
         run: |
-          rustup target add ${{ env.RUST_TARGET }}
-          gh release download --repo rust-cross/cargo-zigbuild -p '*.x86_64-unknown-linux-musl.tar.gz' -O - | tar xzf - -C /usr/local/bin
+          gh release download \
+            --repo rust-cross/cargo-zigbuild \
+            -p '*.x86_64-unknown-linux-musl.tar.gz' \
+            -O - | tar xzf - -C /usr/local/bin
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Build for ${{ env.RUST_TARGET }}
-        run: cargo zigbuild --locked --release --target ${{ env.RUST_TARGET }}
+      - name: Build
+        run: cargo zigbuild --locked --release --target '${{ env.RUST_TARGET }}'
 
       - name: Rename binary
-        run: cp target/${{ env.RUST_TARGET }}/release/${{ env.BIN }} ${{ env.BIN }}.${{ env.RUST_TARGET }}
+        run: |
+          mv \
+            'target/${{ env.RUST_TARGET }}/release/${{ env.BIN }}' \
+            'target/${{ env.RUST_TARGET }}/release/${{ env.BIN }}.${{ env.RUST_TARGET }}'
 
-      - name: Upload artefact
+      - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.BIN }}.${{ env.RUST_TARGET }}
-          path: ${{ env.BIN }}.${{ env.RUST_TARGET }}
+          path: target/${{ env.RUST_TARGET }}release/${{ env.BIN }}.${{ env.RUST_TARGET }}
 
-  push:
-    needs: build
+  container-image:
+    needs: compile-binary
     runs-on: ubuntu-latest
 
     permissions:
@@ -67,7 +75,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - name: Download artefact
+      - name: Download artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.8.1
         with:
           path: bin
@@ -77,9 +85,9 @@ jobs:
       - name: Rename & chmod binaries
         working-directory: bin
         run: |
-          mv ${{ env.BIN }}.aarch64* ${{ env.BIN }}.arm64
-          mv ${{ env.BIN }}.x86_64* ${{ env.BIN }}.amd64
-          chmod +x *
+          mv '${{ env.BIN }}'.aarch64* '${{ env.BIN }}.arm64'
+          mv '${{ env.BIN }}'.x86_64* '${{ env.BIN }}.amd64'
+          chmod +x '${{ env.BIN }}'.*
 
       - name: Extract container image metadata
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0

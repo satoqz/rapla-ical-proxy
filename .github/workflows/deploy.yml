@@ -1,32 +1,27 @@
-name: fly
+name: Deploy
 
 on:
   workflow_dispatch:
     inputs:
-      commit_sha:
+      commit:
         type: string
         required: false
 
 jobs:
-  deploy:
+  fly:
     runs-on: ubuntu-latest
     environment: production
     concurrency: deploy-group
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
 
-      - name: Deploy to Fly.io
+      - name: flyctl deploy
         run: |
-          tag="${{ inputs.commit_sha }}"
-          if [[ "$tag" = "" ]]; then
-            # Fall back to whatever is checked out as default
-            tag="${{ github.sha }}"
-          fi
-          flyctl deploy -i "ghcr.io/${{ github.repository }}:$tag"
+          flyctl deploy -i 'ghcr.io/${{ github.repository }}:${{ inputs.commit || github.sha }}'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
