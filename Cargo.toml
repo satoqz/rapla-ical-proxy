@@ -14,3 +14,6 @@ serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["preserve_order"] }
 serde_urlencoded = "0.7"
 tokio = { version = "1.49", features = ["rt-multi-thread", "signal", "test-util"] }
+
+[profile.release]
+strip = true
