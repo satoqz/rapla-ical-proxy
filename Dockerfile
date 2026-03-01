@@ -1,4 +1,4 @@
-FROM gcr.io/distroless/static:nonroot@sha256:cba10d7abd3e203428e86f5b2d7fd5eb7d8987c387864ae4996cf97191b33764 AS runtime
+FROM gcr.io/distroless/static:nonroot@sha256:f512d819b8f109f2375e8b51d8cfd8aafe81034bc3e319740128b7d7f70d5036 AS runtime
 
 # Used for CI builds that cross-compile outside of the container build.
 # Assumes a directory layout of bin/rapla-ical-proxy-{arm64,amd64,...}.
