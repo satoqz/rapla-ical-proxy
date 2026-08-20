@@ -1,5 +1,4 @@
 mod cache;
-mod calendar;
 mod logging;
 mod parser;
 mod proxy;
@@ -7,6 +6,7 @@ mod resolver;
 
 use std::env::{self, VarError};
 use std::fmt::Display;
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -31,7 +31,9 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("couldn't handle request");
 
-        eprintln!("{calendar:#?}");
+        io::stdout()
+            .write_all(calendar.to_string().as_bytes())
+            .unwrap();
 
         return Ok(());
     }

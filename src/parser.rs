@@ -1,11 +1,9 @@
-use std::ops::Not;
 use std::sync::OnceLock;
 
 use chrono::{Duration, NaiveDate, NaiveTime};
 use html_escape::decode_html_entities;
+use icalendar::{Calendar, CalendarDateTime, Component, Event, EventLike};
 use scraper::{ElementRef, Html, Selector};
-
-use crate::calendar::{Calendar, Event};
 
 trait InspectNone {
     fn inspect_none(self, f: impl FnOnce()) -> Self;
@@ -65,7 +63,13 @@ pub fn parse_calendar(s: &str, mut start_year: i32) -> Option<Calendar> {
         .trim()
         .to_string();
 
-    let mut events = Vec::new();
+    let mut calendar = Calendar::empty()
+        .append_property(("VERSION", "2.0"))
+        .append_property(("PRODID", env!("CARGO_PKG_NAME")))
+        .append_property(("CALSCALE", "GREGORIAN"))
+        .name(&name)
+        .done();
+
     for (idx, week_element) in select!(html, "div.calendar > table.week_table > tbody").enumerate()
     {
         let week_number_html = select!(week_element, "th.week_number")
@@ -85,11 +89,12 @@ pub fn parse_calendar(s: &str, mut start_year: i32) -> Option<Calendar> {
             start_year += 1;
         }
 
-        let mut week_events = parse_week(week_element, start_year).inspect_none(trace_none!())?;
-        events.append(&mut week_events);
+        for event in parse_week(week_element, start_year).inspect_none(trace_none!())? {
+            calendar.push(event);
+        }
     }
 
-    Some(Calendar { name, events })
+    Some(calendar)
 }
 
 fn parse_week(element: ElementRef, start_year: i32) -> Option<Vec<Event>> {
@@ -184,24 +189,40 @@ fn parse_event(element: ElementRef, date: NaiveDate) -> Option<Event> {
     let title = details_split.next().inspect_none(trace_none!())?;
     let title = decode_html_entities(title).to_string();
 
+    let mut event = Event::new()
+        .uid(&format!(
+            "{}T{}00_{}",
+            date.format("%Y%m%d"),
+            start.format("%H%M"),
+            title.replace(' ', "-")
+        ))
+        .summary(&title)
+        .starts(CalendarDateTime::WithTimezone {
+            date_time: date.and_time(start),
+            tzid: "Europe/Berlin".into(),
+        })
+        .ends(CalendarDateTime::WithTimezone {
+            date_time: date.and_time(end),
+            tzid: "Europe/Berlin".into(),
+        })
+        .done();
+
     let resources = select!(element, "span.resource")
         .map(|location| decode_html_entities(&location.inner_html()).to_string())
         .collect::<Vec<_>>();
-    let location = resources.last().cloned();
-    let description = resources.is_empty().not().then(|| resources.join(", "));
-
     let persons = select!(element, "span.person")
         .map(|person| decode_html_entities(&person.inner_html()).to_string())
         .collect::<Vec<_>>();
-    let organizer = persons.is_empty().not().then(|| persons.join(", "));
 
-    Some(Event {
-        date,
-        start,
-        end,
-        title,
-        location,
-        organizer,
-        description,
-    })
+    if let Some(location) = resources.last() {
+        event.location(location);
+    }
+    if !resources.is_empty() {
+        event.description(&resources.join(", "));
+    }
+    if !persons.is_empty() {
+        event.add_property("ORGANIZER", persons.join(", "));
+    }
+
+    Some(event)
 }

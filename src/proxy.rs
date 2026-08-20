@@ -5,8 +5,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
+use icalendar::Calendar;
 
-use crate::calendar::Calendar;
 use crate::resolver::UpstreamUrlExtension;
 
 pub enum Error {
@@ -65,16 +65,6 @@ impl IntoResponse for Error {
     }
 }
 
-impl IntoResponse for Calendar {
-    fn into_response(self) -> axum::response::Response {
-        (
-            [("content-type", "text/calendar")],
-            self.to_ics().to_string(),
-        )
-            .into_response()
-    }
-}
-
 pub fn build_client() -> reqwest::Client {
     const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
     reqwest::Client::builder()
@@ -91,7 +81,8 @@ async fn request_handler(
     State(client): State<reqwest::Client>,
     Extension(upstream): Extension<UpstreamUrlExtension>,
 ) -> Result<Response, Error> {
-    Ok(handle(&client, upstream).await?.into_response())
+    let calendar = handle(&client, upstream).await?;
+    Ok(([("content-type", "text/calendar")], calendar.to_string()).into_response())
 }
 
 pub async fn handle(
