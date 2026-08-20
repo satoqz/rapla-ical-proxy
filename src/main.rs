@@ -1,4 +1,5 @@
 mod cache;
+mod filter;
 mod logging;
 mod parser;
 mod proxy;
@@ -48,6 +49,7 @@ async fn main() -> std::io::Result<()> {
     let router = Router::new();
     let router = crate::proxy::apply_routes(router);
     let router = crate::cache::apply_middleware(router, (cache_ttl, cache_capacity));
+    let router = crate::filter::apply_middleware(router);
     let router = crate::resolver::apply_middleware(router);
     let router = crate::logging::apply_middleware(router);
 

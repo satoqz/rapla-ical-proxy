@@ -29,12 +29,14 @@ pub struct UpstreamUrlComponents {
     page: String,
     query: RaplaBaseQuery,
     cutoff_date: Option<String>,
+    name_filters: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct UpstreamUrlExtension {
     pub url: String,
     pub start_year: i32,
+    pub name_filters: Vec<String>,
 }
 
 pub fn apply_middleware(router: Router) -> Router {
@@ -86,7 +88,18 @@ impl UpstreamUrlComponents {
             return None;
         }
 
-        let query: RaplaQueryWithPage = serde_urlencoded::from_str(uri.query()?).ok()?;
+        let query_raw = uri.query()?;
+        let pairs: Vec<(String, String)> = serde_urlencoded::from_str(query_raw).ok()?;
+
+        let mut name_filters = Vec::new();
+        for (key, value) in pairs {
+            if key == "name" {
+                name_filters.push(value);
+            }
+        }
+
+        let query: RaplaQueryWithPage = serde_urlencoded::from_str(query_raw).ok()?;
+
         let page = query.page.or_else(|| {
             let path = uri.path();
             path.starts_with("/rapla/").then(|| {
@@ -101,6 +114,7 @@ impl UpstreamUrlComponents {
             page,
             query: query.base,
             cutoff_date: query.cutoff_date,
+            name_filters,
         })
     }
 
@@ -133,6 +147,7 @@ impl UpstreamUrlComponents {
         UpstreamUrlExtension {
             url,
             start_year: cutoff.year(),
+            name_filters: self.name_filters,
         }
     }
 }
