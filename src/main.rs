@@ -3,7 +3,7 @@ mod filter;
 mod logging;
 mod parser;
 mod proxy;
-mod resolver;
+mod query;
 
 use std::env::{self, VarError};
 use std::fmt::Display;
@@ -21,13 +21,10 @@ async fn main() -> std::io::Result<()> {
     #[cfg(debug_assertions)]
     if let Some(uri) = getenv("RAPLA_DEBUG") {
         use crate::proxy::{build_client, handle};
-        use crate::resolver::UpstreamUrlComponents;
 
         let calendar = handle(
             &build_client(),
-            UpstreamUrlComponents::from_request_uri(&uri)
-                .expect("couldn't resolve upstream")
-                .generate_url(),
+            query::Extension::from_request_uri(&uri).expect("couldn't resolve query"),
         )
         .await
         .expect("couldn't handle request");
@@ -50,7 +47,7 @@ async fn main() -> std::io::Result<()> {
     let router = crate::proxy::apply_routes(router);
     let router = crate::cache::apply_middleware(router, (cache_ttl, cache_capacity));
     let router = crate::filter::apply_middleware(router);
-    let router = crate::resolver::apply_middleware(router);
+    let router = crate::query::apply_middleware(router);
     let router = crate::logging::apply_middleware(router);
 
     let listener = TcpListener::bind(address).await?;

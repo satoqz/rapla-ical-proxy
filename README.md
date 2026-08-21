@@ -47,10 +47,12 @@ certain date, you can add the `cutoff_date` URL parameter:
 https://rapla.dhbw.de/rapla/calendar?other=parameters&cutoff_date=YYYY-MM-DD
 ```
 
-This will shift the two-year range that is scanned by default to start at the
-specified cutoff date.
+This will clip off any events that precede the cutoff date from the returned
+calendar.
 
-You can also filter events by their ical properties. All filters are case-insensitive and check if the given property contains the filter value. All events that match at least one filter are returned.
+You can also filter events by their ical properties. All filters are
+case-insensitive and check if the given property contains the filter value. All
+events that match at least one filter are returned.
 
 ```yaml
 # search by event title
@@ -59,10 +61,6 @@ https://rapla.dhbw.de/rapla/calendar?other=parameters&filter=summary:linux&filte
 # only list online lectures
 https://rapla.dhbw.de/rapla/calendar?other=parameters&filter=location:online
 ```
-
-When at least one `name` is set, only events whose title contains any of the
-provided values (case-insensitive) are returned. Without `name`, all events are
-returned as usual.
 
 ## Self-hosting
 

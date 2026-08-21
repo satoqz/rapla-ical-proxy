@@ -1,13 +1,13 @@
 use std::fmt;
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use icalendar::Calendar;
 
-use crate::resolver::UpstreamUrlExtension;
+use crate::query;
 
 pub enum Error {
     Request(reqwest::Error),
@@ -17,9 +17,9 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match &self {
-            Self::Request(err) if err.is_status() => "upstream returned unexpected status code",
-            Self::Request(_) => "can't connect to upstream",
-            Self::Parse => "can't parse calendar",
+            Self::Request(err) if err.is_status() => "Upstream returned unexpected status code!",
+            Self::Request(_) => "Failed to connect to upstream!",
+            Self::Parse => "Failed to parse calendar!",
         };
         write!(f, "{message}")
     }
@@ -58,8 +58,8 @@ impl IntoResponse for Error {
 
         (
             status,
-            [("content-type", "text/plain")],
-            format!("Error: {self}"),
+            [(header::CONTENT_TYPE, "text/plain")],
+            self.to_string(),
         )
             .into_response()
     }
@@ -79,18 +79,19 @@ pub fn apply_routes(router: Router) -> Router {
 
 async fn request_handler(
     State(client): State<reqwest::Client>,
-    Extension(upstream): Extension<UpstreamUrlExtension>,
+    Extension(query): Extension<query::Extension>,
 ) -> Result<Response, Error> {
-    let calendar = handle(&client, upstream).await?;
-    Ok(([("content-type", "text/calendar")], calendar.to_string()).into_response())
+    let calendar = handle(&client, query).await?;
+    Ok((
+        [(header::CONTENT_TYPE, "text/calendar")],
+        calendar.to_string(),
+    )
+        .into_response())
 }
 
-pub async fn handle(
-    client: &reqwest::Client,
-    upstream: UpstreamUrlExtension,
-) -> Result<Calendar, Error> {
-    let request = client.get(&upstream.url).build()?;
+pub async fn handle(client: &reqwest::Client, query: query::Extension) -> Result<Calendar, Error> {
+    let request = client.get(&query.url).build()?;
     let response = client.execute(request).await?.error_for_status()?;
     let html = response.text().await?;
-    crate::parser::parse_calendar(&html, upstream.start_year).ok_or(Error::Parse)
+    crate::parser::parse_calendar(&html, query.start_year).ok_or(Error::Parse)
 }

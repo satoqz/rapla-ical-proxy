@@ -10,9 +10,9 @@ use axum::{Extension, Router};
 use moka::future::Cache;
 use tokio::time::{Duration, Instant};
 
-use crate::resolver::UpstreamUrlExtension;
+use crate::query;
 
-const CACHE_AGE_HEADER: &str = "X-Cache-Age";
+const CACHE_AGE_HEADER: &str = "x-cache-age";
 
 #[derive(Debug, Clone)]
 struct CachedResponse {
@@ -56,14 +56,14 @@ pub fn apply_middleware(router: Router, (ttl, max_capacity): (Duration, u64)) ->
 
 async fn cache_middleware(
     State(cache): State<Arc<Cache<String, CachedResponse>>>,
-    Extension(upstream): Extension<UpstreamUrlExtension>,
+    Extension(query): Extension<query::Extension>,
     request: Request,
     next: Next,
 ) -> Response {
     let mut cache_hit = true;
 
     let cached = cache
-        .get_with(upstream.url, async {
+        .get_with(query.url, async {
             cache_hit = false;
             // Cache responses no matter their status. Caching errored responses
             // saves additional calls to upstream and parsing CPU time for paths

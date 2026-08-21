@@ -4,7 +4,7 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "http2", "query"] }
-chrono = { version = "0.4", default-features = false, features = ["std", "now"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "now", "serde"] }
 html-escape = "0.2"
 icalendar = { version = "0.17", default-features = false, features = ["parser"] }
 moka = { version = "0.12", default-features = false, features = ["future"] }
