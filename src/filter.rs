@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Router};
 use icalendar::{Calendar, CalendarComponent, Component};
 
@@ -17,7 +17,7 @@ async fn filter_middleware(
     request: Request,
     next: Next,
 ) -> Response {
-    if upstream.name_filters.is_empty() {
+    if upstream.filters.is_empty() {
         return next.run(request).await;
     }
 
@@ -38,17 +38,19 @@ async fn filter_middleware(
         .await
         .expect("response size is bigger than max usize");
 
-    match filter_ics(&data, &upstream.name_filters) {
+    match filter_ics(&data, &upstream.filters) {
         Ok(filtered) => Response::from_parts(parts, Body::from(filtered)),
-        Err(_) => Response::from_parts(parts, Body::from(data)),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     }
 }
 
-fn filter_ics(data: &[u8], name_filters: &[String]) -> Result<Vec<u8>, String> {
-    let filters = name_filters
+/// Filter calendar events by matching a property value.
+/// Each entry is a `(property, value)` pair parsed from `filter=PROPERTY:value`.
+fn filter_ics(data: &[u8], filters: &[(String, String)]) -> Result<Vec<u8>, String> {
+    let filters: Vec<(String, String)> = filters
         .iter()
-        .map(|name| name.to_ascii_lowercase())
-        .collect::<Vec<_>>();
+        .map(|(prop, val)| (prop.to_ascii_uppercase(), val.to_ascii_lowercase()))
+        .collect();
 
     let text = std::str::from_utf8(data).map_err(|e| format!("invalid utf-8: {}", e))?;
     let mut calendar: Calendar = text
@@ -56,15 +58,12 @@ fn filter_ics(data: &[u8], name_filters: &[String]) -> Result<Vec<u8>, String> {
         .map_err(|e: String| format!("failed to parse calendar: {}", e))?;
 
     calendar.components.retain(|component| match component {
-        CalendarComponent::Event(event) => event
-            .get_summary()
-            .map(|summary| {
-                let summary = summary.to_ascii_lowercase();
-                filters
-                    .iter()
-                    .any(|filter| summary.contains(filter.as_str()))
-            })
-            .unwrap_or(false),
+        CalendarComponent::Event(event) => filters.iter().any(|(property, value)| {
+            event
+                .property_value(property)
+                .map(|v| v.to_ascii_lowercase().contains(value.as_str()))
+                .unwrap_or(false)
+        }),
         _ => true,
     });
 
@@ -79,7 +78,9 @@ mod tests {
     fn keeps_matching_event_summary() {
         let ics = b"BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Linux Fundamentals\nEND:VEVENT\nBEGIN:VEVENT\nSUMMARY:Math\nEND:VEVENT\nEND:VCALENDAR\n";
 
-        let filtered = String::from_utf8(filter_ics(ics, &["Linux".into()]).unwrap()).unwrap();
+        let filtered =
+            String::from_utf8(filter_ics(ics, &[("SUMMARY".into(), "Linux".into())]).unwrap())
+                .unwrap();
 
         assert!(filtered.contains("SUMMARY:Linux Fundamentals"));
         assert!(!filtered.contains("SUMMARY:Math"));
@@ -89,9 +90,17 @@ mod tests {
     fn keeps_multiple_matching_event_summaries() {
         let ics = b"BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Linux\nEND:VEVENT\nBEGIN:VEVENT\nSUMMARY:Software Engineering\nEND:VEVENT\nEND:VCALENDAR\n";
 
-        let filtered =
-            String::from_utf8(filter_ics(ics, &["Linux".into(), "Engineering".into()]).unwrap())
-                .unwrap();
+        let filtered = String::from_utf8(
+            filter_ics(
+                ics,
+                &[
+                    ("SUMMARY".into(), "Linux".into()),
+                    ("SUMMARY".into(), "Engineering".into()),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
 
         assert!(filtered.contains("SUMMARY:Linux"));
         assert!(filtered.contains("SUMMARY:Software Engineering"));
